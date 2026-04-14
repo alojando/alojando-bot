@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.env
+reportes/
+test_*.py
+google_*.html
+google_*.txt
+.vscode/
+.idea/

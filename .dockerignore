@@ -1,0 +1,13 @@
+__pycache__
+*.pyc
+.git
+.gitignore
+*.md
+reportes/*
+test_*.py
+google_*.html
+google_*.txt
+.env
+.vscode
+.idea
+node_modules

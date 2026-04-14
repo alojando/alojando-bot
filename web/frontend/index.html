@@ -1,0 +1,1098 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Alojando BOT</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #2563eb; --primary-dark: #1d4ed8; --primary-light: #3b82f6;
+            --success: #16a34a; --warning: #d97706; --danger: #dc2626;
+            --bg: #0f172a; --bg-card: #1e293b; --bg-input: #334155;
+            --text: #f1f5f9; --text-muted: #94a3b8; --text-dim: #64748b;
+            --border: #334155; --accent: #7c3aed;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: var(--bg); }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+        /* Layout */
+        .app { min-height: 100vh; }
+        .navbar { background: rgba(15,23,42,0.8); backdrop-filter: blur(12px); border-bottom: 1px solid var(--border);
+            padding: 1rem 2rem; display: flex; align-items: center; justify-content: space-between;
+            position: sticky; top: 0; z-index: 100; }
+        .navbar h1 { font-size: 1.4rem; font-weight: 700; background: linear-gradient(135deg, var(--primary-light), var(--accent));
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .navbar .badge { background: var(--primary); color: white; padding: 0.2rem 0.6rem; border-radius: 9999px;
+            font-size: 0.7rem; font-weight: 600; }
+
+        .container { max-width: 1200px; margin: 0 auto; padding: 2rem; }
+
+        /* Cards */
+        .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 16px;
+            padding: 2rem; margin-bottom: 1.5rem; transition: all 0.2s; }
+        .card:hover { border-color: var(--primary); }
+        .card h2 { font-size: 1.2rem; font-weight: 600; margin-bottom: 1rem;
+            display: flex; align-items: center; gap: 0.5rem; }
+        .card h2 .icon { font-size: 1.3rem; }
+
+        /* Forms */
+        .form-group { margin-bottom: 1.25rem; }
+        .form-group label { display: block; font-size: 0.85rem; font-weight: 500; color: var(--text-muted);
+            margin-bottom: 0.4rem; }
+        .form-group input, .form-group textarea, .form-group select {
+            width: 100%; padding: 0.75rem 1rem; background: var(--bg-input); border: 1px solid var(--border);
+            border-radius: 10px; color: var(--text); font-size: 0.95rem; font-family: inherit;
+            transition: border-color 0.2s; outline: none; }
+        .form-group input:focus, .form-group textarea:focus, .form-group select:focus {
+            border-color: var(--primary); box-shadow: 0 0 0 3px rgba(37,99,235,0.15); }
+        .form-group input::placeholder { color: var(--text-dim); }
+
+        .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+        .form-row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; }
+
+        /* Buttons */
+        .btn { padding: 0.75rem 1.5rem; border-radius: 10px; font-weight: 600; font-size: 0.95rem;
+            cursor: pointer; border: none; transition: all 0.2s; font-family: inherit; display: inline-flex;
+            align-items: center; gap: 0.5rem; }
+        .btn-primary { background: linear-gradient(135deg, var(--primary), var(--accent)); color: white; }
+        .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 4px 20px rgba(37,99,235,0.4); }
+        .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
+        .btn-secondary { background: var(--bg-input); color: var(--text); border: 1px solid var(--border); }
+        .btn-secondary:hover { border-color: var(--primary); }
+        .btn-demo { background: linear-gradient(135deg, var(--success), #059669); color: white; }
+        .btn-demo:hover { transform: translateY(-1px); box-shadow: 0 4px 20px rgba(22,163,74,0.4); }
+
+        /* Tabs */
+        .tabs { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
+        .tab { padding: 0.6rem 1.2rem; border-radius: 10px; font-weight: 500; font-size: 0.9rem;
+            cursor: pointer; background: var(--bg-input); color: var(--text-muted); border: 1px solid transparent;
+            transition: all 0.2s; }
+        .tab.active { background: var(--primary); color: white; }
+        .tab:hover:not(.active) { border-color: var(--border); color: var(--text); }
+
+        /* Stats */
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
+        .stat { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 1.25rem; text-align: center; }
+        .stat .value { font-size: 1.8rem; font-weight: 700; background: linear-gradient(135deg, var(--primary-light), var(--accent));
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .stat .label { font-size: 0.8rem; color: var(--text-muted); margin-top: 0.25rem; }
+
+        /* Progress */
+        .progress-bar { width: 100%; height: 6px; background: var(--bg-input); border-radius: 3px; overflow: hidden; margin: 1rem 0; }
+        .progress-fill { height: 100%; background: linear-gradient(90deg, var(--primary), var(--accent));
+            border-radius: 3px; transition: width 0.5s ease; }
+        .progress-text { text-align: center; color: var(--text-muted); font-size: 0.9rem; }
+
+        /* Table */
+        .table-wrap { overflow-x: auto; border-radius: 12px; border: 1px solid var(--border); }
+        table { width: 100%; border-collapse: collapse; }
+        th { background: var(--bg-input); padding: 0.75rem 1rem; text-align: left; font-size: 0.8rem;
+            font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+        td { padding: 0.75rem 1rem; border-top: 1px solid var(--border); font-size: 0.9rem; }
+        tr:hover td { background: rgba(37,99,235,0.05); }
+        tr.highlight td { background: rgba(37,99,235,0.1); font-weight: 600; }
+
+        /* Tags */
+        .tag { display: inline-block; padding: 0.2rem 0.7rem; margin: 0.2rem; border-radius: 9999px;
+            font-size: 0.8rem; font-weight: 500; }
+        .tag-portal { color: white; font-size: 0.7rem; font-weight: 600; }
+        .tag-airbnb { background: #FF5A5F; } .tag-booking { background: #003580; }
+        .tag-vrbo { background: #3B5998; } .tag-google { background: #4285F4; } .tag-manual { background: #6B7280; }
+        .tag-amenity { background: rgba(99,102,241,0.15); color: #a5b4fc; }
+        .tag-missing { background: rgba(239,68,68,0.15); color: #fca5a5; }
+        .tag-unique { background: rgba(34,197,94,0.15); color: #86efac; }
+
+        /* Suggestions */
+        .suggestion { background: rgba(37,99,235,0.08); border-left: 3px solid var(--primary);
+            padding: 1rem 1.25rem; margin: 0.6rem 0; border-radius: 0 10px 10px 0; font-size: 0.9rem;
+            line-height: 1.6; color: var(--text-muted); }
+
+        /* Charts */
+        .chart-box { position: relative; height: 300px; margin: 1rem 0; }
+        .two-charts { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+
+        /* Hero */
+        .hero { text-align: center; padding: 3rem 1rem; }
+        .hero h2 { font-size: 2.5rem; font-weight: 800; margin-bottom: 0.75rem;
+            background: linear-gradient(135deg, var(--text), var(--primary-light));
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .hero p { color: var(--text-muted); font-size: 1.1rem; max-width: 600px; margin: 0 auto 2rem; }
+
+        /* Mode selector */
+        .mode-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin: 2rem 0; }
+        .mode-card { background: var(--bg-card); border: 2px solid var(--border); border-radius: 16px;
+            padding: 1.5rem; cursor: pointer; text-align: center; transition: all 0.2s; }
+        .mode-card:hover { border-color: var(--primary); transform: translateY(-2px); }
+        .mode-card.selected { border-color: var(--primary); background: rgba(37,99,235,0.08); }
+        .mode-card .mode-icon { font-size: 2rem; margin-bottom: 0.75rem; }
+        .mode-card h3 { font-size: 1rem; margin-bottom: 0.4rem; }
+        .mode-card p { font-size: 0.8rem; color: var(--text-muted); }
+
+        /* Download buttons */
+        .download-bar { display: flex; gap: 0.75rem; flex-wrap: wrap; margin: 1rem 0; }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .container { padding: 1rem; }
+            .form-row, .form-row-3, .two-charts { grid-template-columns: 1fr; }
+            .hero h2 { font-size: 1.8rem; }
+        }
+
+        /* Loading spinner */
+        .spinner { width: 40px; height: 40px; border: 4px solid var(--border); border-top: 4px solid var(--primary);
+            border-radius: 50%; animation: spin 1s linear infinite; margin: 1rem auto; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Section headers in results */
+        .section-header { display: flex; align-items: center; gap: 0.5rem; margin: 2rem 0 1rem;
+            padding-bottom: 0.5rem; border-bottom: 2px solid var(--primary); }
+        .section-header h2 { font-size: 1.3rem; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+    const { useState, useEffect, useRef, useCallback } = React;
+
+    const API = window.location.origin + "/api";
+
+    // ============================================
+    // MAIN APP
+    // ============================================
+    function App() {
+        const [view, setView] = useState("home"); // home | form | loading | results
+        const [mode, setMode] = useState(""); // url | manual | demo
+        const [analysisId, setAnalysisId] = useState(null);
+        const [progress, setProgress] = useState({ progress: 0, message: "" });
+        const [result, setResult] = useState(null);
+        const [reports, setReports] = useState({ html: null, docx: null });
+
+        const pollInterval = useRef(null);
+
+        // Fetch HTML via backend proxy
+        const proxyFetch = async (url) => {
+            const res = await fetch(API + "/proxy-fetch", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ url }),
+            });
+            return await res.json();
+        };
+
+        const startAnalysis = async (payload) => {
+            setView("loading");
+            setProgress({ progress: 2, message: "Iniciando..." });
+
+            // For URL mode: use browser-assisted flow
+            if (payload.mode === "url") {
+                try {
+                    await runBrowserAssistedAnalysis(payload.url, payload.price, payload.currency, payload.address, payload.radius_meters, payload.max_comparables || 20, payload.bedrooms || 0, payload.max_guests || 0, payload.amenities || [], payload.property_type || "", payload.portals || ["airbnb","booking","google","vrbo"], payload.checkin || "", payload.checkout || "");
+                } catch (err) {
+                    alert("Error: " + err.message);
+                    setView("form");
+                }
+                return;
+            }
+
+            // For manual/demo: direct backend call
+            try {
+                const res = await fetch(API + "/analyze", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload),
+                });
+                const data = await res.json();
+
+                if (data.error) {
+                    alert("Error: " + data.error);
+                    setView("form");
+                    return;
+                }
+
+                setAnalysisId(data.analysis_id);
+                pollInterval.current = setInterval(() => pollStatus(data.analysis_id), 1500);
+            } catch (err) {
+                alert("Error de conexion: " + err.message);
+                setView("form");
+            }
+        };
+
+        const runBrowserAssistedAnalysis = async (url, manualPrice, currency, address, radiusMeters, maxComps, bedrooms, maxGuests, amenities, propertyType, portals, checkin, checkout) => {
+            // Step 1: Fetch the listing page via proxy
+            // For Airbnb: add dates to URL to get pricing data
+            let fetchUrl = url;
+            if (url.includes("airbnb")) {
+                let ci, co;
+                if (checkin && checkout) {
+                    ci = checkin;
+                    co = checkout;
+                } else {
+                    const tomorrow = new Date();
+                    tomorrow.setDate(tomorrow.getDate() + 7);
+                    const coDate = new Date(tomorrow);
+                    coDate.setDate(coDate.getDate() + 2);
+                    ci = tomorrow.toISOString().split("T")[0];
+                    co = coDate.toISOString().split("T")[0];
+                }
+                const sep = url.includes("?") ? "&" : "?";
+                fetchUrl = url + sep + "check_in=" + ci + "&check_out=" + co + "&adults=2";
+            }
+
+            setProgress({ progress: 5, message: "Obteniendo datos del anuncio..." });
+            const listingFetch = await proxyFetch(fetchUrl);
+
+            let listingHtml = null;
+            if (listingFetch.success && listingFetch.content_length > 5000) {
+                listingHtml = listingFetch.html;
+                setProgress({ progress: 15, message: "Anuncio obtenido. Extrayendo datos..." });
+            } else {
+                // Fallback: try original URL without dates
+                setProgress({ progress: 8, message: "Reintentando sin fechas..." });
+                const fallbackFetch = await proxyFetch(url);
+                if (fallbackFetch.success && fallbackFetch.content_length > 5000) {
+                    listingHtml = fallbackFetch.html;
+                }
+                setProgress({ progress: 15, message: "Extrayendo datos del anuncio..." });
+            }
+
+            // Step 2: Get search URLs from the backend
+            setProgress({ progress: 20, message: "Preparando busqueda de comparables..." });
+            const searchUrlsRes = await fetch(API + "/search-urls", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ url, html: listingHtml, address: address || "", radius_meters: radiusMeters || 5000, max_comparables: maxComps || 20, bedrooms: bedrooms || 0, max_guests: maxGuests || 0, property_type: propertyType || "", portals: portals, checkin: checkin || "", checkout: checkout || "" }),
+            });
+            const searchUrlsData = await searchUrlsRes.json();
+
+            if (searchUrlsData.error) {
+                throw new Error(searchUrlsData.error);
+            }
+
+            const searchUrls = searchUrlsData.search_urls || {};
+            const portalKeys = Object.keys(searchUrls);
+
+            // Step 3: Fetch each portal's search page via proxy (with pagination for Airbnb)
+            const searchHtml = {};
+            const portalStatus = [];
+            const AIRBNB_PER_PAGE = 18;
+            const pagesNeeded = (portal) => {
+                if (portal === "airbnb" && maxComps > AIRBNB_PER_PAGE) {
+                    return Math.ceil(maxComps / AIRBNB_PER_PAGE);
+                }
+                return 1;
+            };
+
+            for (let i = 0; i < portalKeys.length; i++) {
+                const portal = portalKeys[i];
+                const pages = pagesNeeded(portal);
+                const pct = 25 + Math.round((i / portalKeys.length) * 35);
+
+                for (let page = 0; page < pages; page++) {
+                    let fetchUrlForPortal = searchUrls[portal];
+                    if (portal === "airbnb" && page > 0) {
+                        const offset = page * AIRBNB_PER_PAGE;
+                        const sep = fetchUrlForPortal.includes("?") ? "&" : "?";
+                        fetchUrlForPortal += sep + "items_offset=" + offset;
+                    }
+                    const pageLabel = pages > 1 ? ` (pagina ${page+1}/${pages})` : "";
+                    setProgress({ progress: pct, message: `Buscando en ${portal.toUpperCase()}${pageLabel}... (${i+1}/${portalKeys.length})` });
+
+                    try {
+                        const result = await proxyFetch(fetchUrlForPortal);
+                        if (result.success && result.content_length > 2000) {
+                            if (page === 0) {
+                                searchHtml[portal] = result.html;
+                            } else {
+                                // Append additional page HTML with a separator
+                                searchHtml[portal] += "\n<!-- PAGE_BREAK -->\n" + result.html;
+                            }
+                            if (!portalStatus.includes(portal.toUpperCase())) {
+                                portalStatus.push(portal.toUpperCase());
+                            }
+                            console.log(`${portal} page ${page+1}: OK (${result.content_length} chars)`);
+                        } else {
+                            console.warn(`${portal} page ${page+1}: respuesta corta o fallida (${result.content_length || 0} chars, status=${result.status})`);
+                            break; // No point fetching more pages
+                        }
+                    } catch (e) {
+                        console.warn(`Fallo fetch ${portal} page ${page+1}:`, e);
+                        break;
+                    }
+
+                    // Small delay between requests
+                    await new Promise(r => setTimeout(r, 1000));
+                }
+            }
+
+            const okMsg = portalStatus.length > 0
+                ? `Datos obtenidos de: ${portalStatus.join(", ")}. Analizando...`
+                : "No se obtuvieron datos de portales. Intentando analisis...";
+            // Step 4: Send everything to the backend for analysis
+            setProgress({ progress: 65, message: okMsg });
+            const analysisRes = await fetch(API + "/analyze/browser-assisted", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    listing_url: url,
+                    listing_html: listingHtml,
+                    search_html: searchHtml,
+                    manual_price: manualPrice || 0,
+                    currency: currency || "USD",
+                    max_comparables: maxComps || 20,
+                    bedrooms: bedrooms || 0,
+                    max_guests: maxGuests || 0,
+                    property_type: propertyType || "",
+                    amenities: amenities || [],
+                }),
+            });
+            const analysisData = await analysisRes.json();
+
+            if (analysisData.error) {
+                throw new Error(analysisData.error);
+            }
+
+            // Step 5: Poll for results
+            setAnalysisId(analysisData.analysis_id);
+            pollInterval.current = setInterval(() => pollStatus(analysisData.analysis_id), 1500);
+        };
+
+        const pollStatus = async (id) => {
+            try {
+                const res = await fetch(API + "/analyze/" + id);
+                const data = await res.json();
+                setProgress({ progress: data.progress, message: data.message });
+
+                if (data.status === "completed") {
+                    clearInterval(pollInterval.current);
+                    setResult(data.result);
+                    setReports({ html: data.html_report, docx: data.docx_report });
+                    setView("results");
+                } else if (data.status === "error") {
+                    clearInterval(pollInterval.current);
+                    alert("Error: " + data.message);
+                    setView("form");
+                }
+            } catch (err) {
+                console.error("Poll error:", err);
+            }
+        };
+
+        const [serverInfo, setServerInfo] = useState(null);
+
+        useEffect(() => {
+            fetch(API + "/health").then(r => r.json()).then(d => setServerInfo(d)).catch(() => {});
+            return () => { if (pollInterval.current) clearInterval(pollInterval.current); };
+        }, []);
+
+        return (
+            <div className="app">
+                <nav className="navbar">
+                    <h1 onClick={() => { setView("home"); setResult(null); }} style={{ cursor: "pointer" }}>
+                        Alojando BOT
+                    </h1>
+                    <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                        <span className="badge">v2.1</span>
+                        {serverInfo && !serverInfo.playwright_available && (
+                            <span className="badge" style={{ background: "#d97706", fontSize: "0.6rem" }} title="Instala Playwright para comparar con Booking, Vrbo y Google: pip install playwright && playwright install chromium">Solo Airbnb</span>
+                        )}
+                        {serverInfo && serverInfo.playwright_available && (
+                            <span className="badge" style={{ background: "#16a34a", fontSize: "0.6rem" }}>Multi-portal</span>
+                        )}
+                    </div>
+                </nav>
+
+                <div className="container">
+                    {view === "home" && <HomeView onSelectMode={(m) => { setMode(m); if (m === "demo") startAnalysis({ mode: "demo" }); else setView("form"); }} />}
+                    {view === "form" && <FormView mode={mode} onSubmit={startAnalysis} onBack={() => setView("home")} />}
+                    {view === "loading" && <LoadingView progress={progress} />}
+                    {view === "results" && result && <ResultsView result={result} reports={reports} onNewAnalysis={() => { setView("home"); setResult(null); }} />}
+                </div>
+            </div>
+        );
+    }
+
+    // ============================================
+    // HOME VIEW
+    // ============================================
+    function HomeView({ onSelectMode }) {
+        return (
+            <div>
+                <div className="hero">
+                    <h2>Analiza tu alquiler temporario</h2>
+                    <p>Compara tu anuncio contra la competencia en Airbnb, Booking, Vrbo y Google.
+                       Obtene sugerencias de precio, titulo, descripcion y mas.</p>
+                </div>
+
+                <div className="mode-cards">
+                    <div className="mode-card" onClick={() => onSelectMode("url")}>
+                        <div className="mode-icon">🔗</div>
+                        <h3>Desde URL</h3>
+                        <p>Pega el link de tu anuncio en Airbnb, Booking u otro portal</p>
+                    </div>
+                    <div className="mode-card" onClick={() => onSelectMode("manual")}>
+                        <div className="mode-icon">✏️</div>
+                        <h3>Ingreso manual</h3>
+                        <p>Completa los datos de tu propiedad paso a paso</p>
+                    </div>
+                    <div className="mode-card" onClick={() => onSelectMode("demo")}>
+                        <div className="mode-icon">🚀</div>
+                        <h3>Demo</h3>
+                        <p>Mira un ejemplo con datos simulados de Palermo Soho</p>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    // ============================================
+    // FORM VIEW
+    // ============================================
+    function FormView({ mode, onSubmit, onBack }) {
+        const [url, setUrl] = useState("");
+        const [urlPrice, setUrlPrice] = useState("");
+        const [urlCurrency, setUrlCurrency] = useState("USD");
+        const [urlAddress, setUrlAddress] = useState("");
+        const [searchRadius, setSearchRadius] = useState("5000");
+        const [maxComparables, setMaxComparables] = useState("20");
+        const [urlBedrooms, setUrlBedrooms] = useState("");
+        const [urlMaxGuests, setUrlMaxGuests] = useState("");
+        const [urlPropertyType, setUrlPropertyType] = useState("Apartamento");
+        const [urlPool, setUrlPool] = useState(false);
+        const [urlParking, setUrlParking] = useState(false);
+        const [urlGym, setUrlGym] = useState(false);
+        const [urlWasher, setUrlWasher] = useState(false);
+        const [urlCheckin, setUrlCheckin] = useState("");
+        const [urlCheckout, setUrlCheckout] = useState("");
+        const [selectedPortals, setSelectedPortals] = useState({ airbnb: true, booking: true, google: true, vrbo: true });
+        const togglePortal = (p) => setSelectedPortals(prev => ({ ...prev, [p]: !prev[p] }));
+        const [formData, setFormData] = useState({
+            title: "", property_type: "Apartamento", description: "",
+            address: "", city: "", country: "", neighborhood: "",
+            price_per_night: "", currency: "USD",
+            bedrooms: "", beds: "", bathrooms: "", max_guests: "",
+            amenities: "", rating: "", review_count: "",
+            check_in: "", check_out: "", min_nights: "",
+        });
+
+        const updateField = (key, val) => setFormData(prev => ({ ...prev, [key]: val }));
+
+        const handleSubmit = () => {
+            if (mode === "url") {
+                if (!url.trim()) { alert("Ingresa una URL"); return; }
+                const amenities = [];
+                if (urlPool) amenities.push("Pileta");
+                if (urlParking) amenities.push("Estacionamiento");
+                if (urlGym) amenities.push("Gimnasio");
+                if (urlWasher) amenities.push("Lavarropas");
+                const portals = Object.keys(selectedPortals).filter(p => selectedPortals[p]);
+                if (portals.length === 0) { alert("Selecciona al menos un portal"); return; }
+                onSubmit({
+                    mode: "url", url: url.trim(),
+                    price: urlPrice ? parseFloat(urlPrice) : 0,
+                    currency: urlCurrency,
+                    address: urlAddress,
+                    radius_meters: parseInt(searchRadius) || 5000,
+                    max_comparables: parseInt(maxComparables) || 20,
+                    bedrooms: urlBedrooms ? parseInt(urlBedrooms) : 0,
+                    max_guests: urlMaxGuests ? parseInt(urlMaxGuests) : 0,
+                    property_type: urlPropertyType,
+                    amenities: amenities,
+                    portals: portals,
+                    checkin: urlCheckin || "",
+                    checkout: urlCheckout || "",
+                });
+            } else {
+                if (!formData.city) { alert("La ciudad es obligatoria"); return; }
+                const portals = Object.keys(selectedPortals).filter(p => selectedPortals[p]);
+                if (portals.length === 0) { alert("Selecciona al menos un portal"); return; }
+                onSubmit({ mode: "manual", data: formData, radius_meters: parseInt(searchRadius) || 5000, max_comparables: parseInt(maxComparables) || 20, portals: portals });
+            }
+        };
+
+        return (
+            <div>
+                <button className="btn btn-secondary" onClick={onBack} style={{ marginBottom: "1rem" }}>
+                    ← Volver
+                </button>
+
+                {mode === "url" ? (
+                    <div className="card">
+                        <h2><span className="icon">🔗</span> Analizar desde URL</h2>
+                        <div className="form-group">
+                            <label>URL del anuncio</label>
+                            <input type="url" value={url} onChange={e => setUrl(e.target.value)}
+                                placeholder="https://www.airbnb.com/rooms/..." />
+                        </div>
+                        <div className="form-group">
+                            <label>Tu precio por noche (Airbnb no lo muestra sin fechas, por eso te lo pedimos)</label>
+                            <div style={{ display: "flex", gap: "0.5rem" }}>
+                                <input type="number" value={urlPrice} onChange={e => setUrlPrice(e.target.value)}
+                                    placeholder="Ej: 65" style={{ flex: 1 }} />
+                                <select value={urlCurrency} onChange={e => setUrlCurrency(e.target.value)}
+                                    style={{ width: "90px" }}>
+                                    <option>USD</option><option>EUR</option><option>ARS</option><option>BRL</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div className="form-group">
+                            <label>Direccion del alojamiento (para buscar comparables cercanos)</label>
+                            <input type="text" value={urlAddress} onChange={e => setUrlAddress(e.target.value)}
+                                placeholder="Ej: Laprida 1200, Recoleta, Buenos Aires, Argentina" />
+                        </div>
+                        <div className="form-row">
+                            <div className="form-group">
+                                <label>Check-in (opcional, filtra solo disponibles)</label>
+                                <input type="date" value={urlCheckin} onChange={e => setUrlCheckin(e.target.value)} />
+                            </div>
+                            <div className="form-group">
+                                <label>Check-out</label>
+                                <input type="date" value={urlCheckout} onChange={e => setUrlCheckout(e.target.value)}
+                                    min={urlCheckin || undefined} />
+                            </div>
+                        </div>
+                        <div style={{ display: "flex", gap: "1rem" }}>
+                            <div className="form-group" style={{ flex: 1 }}>
+                                <label>Tipo de propiedad</label>
+                                <select value={urlPropertyType} onChange={e => setUrlPropertyType(e.target.value)}>
+                                    <option>Apartamento</option><option>Estudio/Monoambiente</option>
+                                    <option>Casa</option><option>Loft</option><option>Villa</option>
+                                </select>
+                            </div>
+                            <div className="form-group" style={{ width: "120px" }}>
+                                <label>Dormitorios</label>
+                                <input type="number" min="0" max="20" value={urlBedrooms} onChange={e => setUrlBedrooms(e.target.value)}
+                                    placeholder="Ej: 2" />
+                            </div>
+                            <div className="form-group" style={{ width: "120px" }}>
+                                <label>Huespedes max.</label>
+                                <input type="number" min="1" max="30" value={urlMaxGuests} onChange={e => setUrlMaxGuests(e.target.value)}
+                                    placeholder="Ej: 4" />
+                            </div>
+                        </div>
+                        <div className="form-group">
+                            <label>Amenidades</label>
+                            <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+                                {[
+                                    { state: urlPool, setter: setUrlPool, label: "Piscina" },
+                                    { state: urlParking, setter: setUrlParking, label: "Cochera" },
+                                    { state: urlGym, setter: setUrlGym, label: "Gimnasio" },
+                                    { state: urlWasher, setter: setUrlWasher, label: "Lavarropas" },
+                                ].map(item => (
+                                    <button key={item.label} type="button"
+                                        className={item.state ? "btn btn-primary" : "btn btn-secondary"}
+                                        onClick={() => item.setter(!item.state)}
+                                        style={{ padding: "0.5rem 1rem", minWidth: "110px" }}>
+                                        {item.state ? "✓ " : ""}{item.label}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                        <div className="form-group">
+                            <label>Radio de busqueda</label>
+                            <div style={{ display: "flex", gap: "0.5rem" }}>
+                                {[{v: "500", l: "500m"}, {v: "1000", l: "1 km"}, {v: "5000", l: "5 km"}, {v: "10000", l: "10 km"}].map(opt => (
+                                    <button key={opt.v} type="button" className={searchRadius === opt.v ? "btn btn-primary" : "btn btn-secondary"}
+                                        onClick={() => setSearchRadius(opt.v)}
+                                        style={{ flex: 1, padding: "0.5rem" }}>
+                                        {opt.l}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                        <div className="form-group">
+                            <label>Cantidad de comparables</label>
+                            <div style={{ display: "flex", gap: "0.5rem" }}>
+                                {[{v: "5", l: "5"}, {v: "10", l: "10"}, {v: "20", l: "20"}, {v: "30", l: "30"}, {v: "50", l: "50"}].map(opt => (
+                                    <button key={opt.v} type="button" className={maxComparables === opt.v ? "btn btn-primary" : "btn btn-secondary"}
+                                        onClick={() => setMaxComparables(opt.v)}
+                                        style={{ flex: 1, padding: "0.5rem" }}>
+                                        {opt.l}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                        <div className="form-group">
+                            <label>Portales de comparacion</label>
+                            <div style={{ display: "flex", gap: "0.5rem" }}>
+                                <button type="button" className={selectedPortals.airbnb ? "btn btn-primary" : "btn btn-secondary"}
+                                    onClick={() => togglePortal("airbnb")} style={{ flex: 1, padding: "0.5rem" }}>
+                                    {selectedPortals.airbnb ? "✓ Airbnb" : "Airbnb"}
+                                </button>
+                                <button type="button" className={selectedPortals.booking ? "btn btn-primary" : "btn btn-secondary"}
+                                    onClick={() => togglePortal("booking")} style={{ flex: 1, padding: "0.5rem" }}>
+                                    {selectedPortals.booking ? "✓ Booking" : "Booking"}
+                                </button>
+                                <button type="button" className={selectedPortals.google ? "btn btn-primary" : "btn btn-secondary"}
+                                    onClick={() => togglePortal("google")} style={{ flex: 1, padding: "0.5rem" }}>
+                                    {selectedPortals.google ? "✓ Google" : "Google"}
+                                </button>
+                                <button type="button" className={selectedPortals.vrbo ? "btn btn-primary" : "btn btn-secondary"}
+                                    onClick={() => togglePortal("vrbo")} style={{ flex: 1, padding: "0.5rem" }}>
+                                    {selectedPortals.vrbo ? "✓ Vrbo" : "Vrbo"}
+                                </button>
+                            </div>
+                        </div>
+                        <button className="btn btn-primary" onClick={handleSubmit}>Analizar</button>
+                    </div>
+                ) : (
+                    <div>
+                        <div className="card">
+                            <h2><span className="icon">🏠</span> Datos de la propiedad</h2>
+                            <div className="form-group">
+                                <label>Titulo del anuncio</label>
+                                <input value={formData.title} onChange={e => updateField("title", e.target.value)}
+                                    placeholder="Ej: Moderno 2BR en Palermo con balcon" />
+                            </div>
+                            <div className="form-row">
+                                <div className="form-group">
+                                    <label>Tipo de propiedad</label>
+                                    <select value={formData.property_type} onChange={e => updateField("property_type", e.target.value)}>
+                                        <option>Apartamento</option><option>Casa</option><option>Estudio</option>
+                                        <option>Loft</option><option>Villa</option><option>Otro</option>
+                                    </select>
+                                </div>
+                                <div className="form-group">
+                                    <label>Precio por noche</label>
+                                    <div style={{ display: "flex", gap: "0.5rem" }}>
+                                        <input type="number" value={formData.price_per_night}
+                                            onChange={e => updateField("price_per_night", e.target.value)}
+                                            placeholder="85" style={{ flex: 1 }} />
+                                        <select value={formData.currency} onChange={e => updateField("currency", e.target.value)}
+                                            style={{ width: "90px" }}>
+                                            <option>USD</option><option>EUR</option><option>ARS</option><option>BRL</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="form-group">
+                                <label>Descripcion</label>
+                                <textarea value={formData.description} onChange={e => updateField("description", e.target.value)}
+                                    placeholder="Describe tu propiedad..." rows="3" />
+                            </div>
+                        </div>
+
+                        <div className="card">
+                            <h2><span className="icon">📍</span> Ubicacion</h2>
+                            <div className="form-row">
+                                <div className="form-group">
+                                    <label>Ciudad *</label>
+                                    <input value={formData.city} onChange={e => updateField("city", e.target.value)}
+                                        placeholder="Buenos Aires" />
+                                </div>
+                                <div className="form-group">
+                                    <label>Pais</label>
+                                    <input value={formData.country} onChange={e => updateField("country", e.target.value)}
+                                        placeholder="Argentina" />
+                                </div>
+                            </div>
+                            <div className="form-row">
+                                <div className="form-group">
+                                    <label>Direccion</label>
+                                    <input value={formData.address} onChange={e => updateField("address", e.target.value)}
+                                        placeholder="Honduras 4800" />
+                                </div>
+                                <div className="form-group">
+                                    <label>Barrio / Zona</label>
+                                    <input value={formData.neighborhood} onChange={e => updateField("neighborhood", e.target.value)}
+                                        placeholder="Palermo Soho" />
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="card">
+                            <h2><span className="icon">🛏️</span> Capacidad</h2>
+                            <div className="form-row-3">
+                                <div className="form-group">
+                                    <label>Dormitorios</label>
+                                    <input type="number" value={formData.bedrooms} onChange={e => updateField("bedrooms", e.target.value)} placeholder="2" />
+                                </div>
+                                <div className="form-group">
+                                    <label>Camas</label>
+                                    <input type="number" value={formData.beds} onChange={e => updateField("beds", e.target.value)} placeholder="3" />
+                                </div>
+                                <div className="form-group">
+                                    <label>Banos</label>
+                                    <input type="number" value={formData.bathrooms} onChange={e => updateField("bathrooms", e.target.value)} placeholder="1" />
+                                </div>
+                            </div>
+                            <div className="form-group">
+                                <label>Huespedes maximos</label>
+                                <input type="number" value={formData.max_guests} onChange={e => updateField("max_guests", e.target.value)} placeholder="4" />
+                            </div>
+                        </div>
+
+                        <div className="card">
+                            <h2><span className="icon">✨</span> Amenidades y resenas</h2>
+                            <div className="form-group">
+                                <label>Amenidades (separadas por coma)</label>
+                                <input value={formData.amenities} onChange={e => updateField("amenities", e.target.value)}
+                                    placeholder="WiFi, Cocina, Aire acondicionado, Smart TV, Lavarropas" />
+                            </div>
+                            <div className="form-row">
+                                <div className="form-group">
+                                    <label>Rating (1-5)</label>
+                                    <input type="number" step="0.1" min="1" max="5" value={formData.rating}
+                                        onChange={e => updateField("rating", e.target.value)} placeholder="4.7" />
+                                </div>
+                                <div className="form-group">
+                                    <label>Cantidad de resenas</label>
+                                    <input type="number" value={formData.review_count}
+                                        onChange={e => updateField("review_count", e.target.value)} placeholder="45" />
+                                </div>
+                            </div>
+                        </div>
+
+                        <button className="btn btn-primary" onClick={handleSubmit} style={{ width: "100%", justifyContent: "center", padding: "1rem" }}>
+                            Analizar mi propiedad
+                        </button>
+                    </div>
+                )}
+            </div>
+        );
+    }
+
+    // ============================================
+    // LOADING VIEW
+    // ============================================
+    function LoadingView({ progress }) {
+        return (
+            <div style={{ textAlign: "center", padding: "4rem 1rem" }}>
+                <div className="spinner"></div>
+                <div className="progress-bar" style={{ maxWidth: 400, margin: "2rem auto" }}>
+                    <div className="progress-fill" style={{ width: progress.progress + "%" }}></div>
+                </div>
+                <p className="progress-text">{progress.message || "Procesando..."}</p>
+                <p style={{ color: "var(--text-dim)", fontSize: "0.85rem", marginTop: "0.5rem" }}>
+                    {progress.progress}% completado
+                </p>
+            </div>
+        );
+    }
+
+    // ============================================
+    // RESULTS VIEW
+    // ============================================
+    function ResultsView({ result, reports, onNewAnalysis }) {
+        const [activeTab, setActiveTab] = useState("overview");
+        const original = result.original || {};
+        const stats = result.stats || {};
+        const analysis = result.analysis || {};
+        const suggestions = result.suggestions || {};
+        const comparables = result.comparables || [];
+        const currency = original.currency || "USD";
+
+        return (
+            <div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "1rem", marginBottom: "1.5rem" }}>
+                    <div>
+                        <h2 style={{ fontSize: "1.5rem", fontWeight: 700 }}>{original.title || "Resultados"}</h2>
+                        <p style={{ color: "var(--text-muted)" }}>
+                            {[original.neighborhood, original.city, original.country].filter(Boolean).join(", ")}
+                        </p>
+                    </div>
+                    <div className="download-bar">
+                        {reports.html && (
+                            <a href={API + "/report/" + reports.html} className="btn btn-secondary" download>
+                                📊 Descargar HTML
+                            </a>
+                        )}
+                        {reports.docx && (
+                            <a href={API + "/report/" + reports.docx} className="btn btn-secondary" download>
+                                📄 Descargar Word
+                            </a>
+                        )}
+                        <button className="btn btn-primary" onClick={onNewAnalysis}>Nuevo analisis</button>
+                    </div>
+                </div>
+
+                {/* Stats */}
+                <div className="stats-grid">
+                    <div className="stat"><div className="value">{stats.total_comparables}</div><div className="label">Comparables</div></div>
+                    <div className="stat"><div className="value">{currency} {Math.round(stats.median_price)}</div><div className="label">Mediana mercado</div></div>
+                    <div className="stat"><div className="value">{currency} {Math.round(original.price_per_night || 0)}</div><div className="label">Tu precio</div></div>
+                    <div className="stat"><div className="value">{(stats.avg_rating || 0).toFixed(1)}</div><div className="label">Rating promedio</div></div>
+                    <div className="stat"><div className="value">{currency} {Math.round(stats.suggested_price_low)}-{Math.round(stats.suggested_price_high)}</div><div className="label">Precio sugerido</div></div>
+                </div>
+
+                {/* Tabs */}
+                <div className="tabs">
+                    {[
+                        ["overview", "Resumen"],
+                        ["pricing", "Precios"],
+                        ["comparables", "Comparables"],
+                        ["amenities", "Amenidades"],
+                        ["suggestions", "Sugerencias"],
+                    ].map(([key, label]) => (
+                        <div key={key} className={"tab" + (activeTab === key ? " active" : "")} onClick={() => setActiveTab(key)}>
+                            {label}
+                        </div>
+                    ))}
+                </div>
+
+                {activeTab === "overview" && <OverviewTab result={result} />}
+                {activeTab === "pricing" && <PricingTab result={result} />}
+                {activeTab === "comparables" && <ComparablesTab result={result} />}
+                {activeTab === "amenities" && <AmenitiesTab result={result} />}
+                {activeTab === "suggestions" && <SuggestionsTab result={result} />}
+            </div>
+        );
+    }
+
+    // ============================================
+    // TABS
+    // ============================================
+    function OverviewTab({ result }) {
+        const suggestions = result.suggestions || {};
+        return (
+            <div>
+                <div className="card">
+                    <h2><span className="icon">💰</span> Precio</h2>
+                    {(suggestions.pricing || []).map((s, i) => <div key={i} className="suggestion">{s}</div>)}
+                </div>
+                <div className="card">
+                    <h2><span className="icon">⭐</span> Calificaciones</h2>
+                    <div className="suggestion">{result.analysis?.rating_comparison || "Sin datos"}</div>
+                </div>
+                <div className="card">
+                    <h2><span className="icon">💡</span> Recomendaciones clave</h2>
+                    {(suggestions.general || []).slice(0, 3).map((s, i) => <div key={i} className="suggestion">{s}</div>)}
+                </div>
+            </div>
+        );
+    }
+
+    function PricingTab({ result }) {
+        const priceChartRef = useRef(null);
+        const distChartRef = useRef(null);
+        const portalChartRef = useRef(null);
+        const portalPieRef = useRef(null);
+        const priceRangePieRef = useRef(null);
+        const stats = result.stats || {};
+        const comparables = result.comparables || [];
+        const original = result.original || {};
+        const currency = original.currency || "USD";
+
+        const chartsRef = useRef([]);
+
+        useEffect(() => {
+            // Destruir charts anteriores para evitar duplicados
+            chartsRef.current.forEach(c => { try { c.destroy(); } catch(e) {} });
+            chartsRef.current = [];
+
+            const prices = comparables.filter(c => c.price_per_night > 0);
+            const colorMap = { airbnb: "#FF5A5F", booking: "#003580", vrbo: "#3B5998", google: "#4285F4" };
+
+            // Price comparison bar chart
+            if (priceChartRef.current) {
+                chartsRef.current.push(new Chart(priceChartRef.current.getContext("2d"), {
+                    type: "bar",
+                    data: {
+                        labels: prices.slice(0, 15).map(c => c.title?.substring(0, 25) + "..."),
+                        datasets: [
+                            { label: "Precio/noche", data: prices.slice(0, 15).map(c => c.price_per_night),
+                              backgroundColor: prices.slice(0, 15).map(c => colorMap[c.source] || "#94a3b8"), borderRadius: 4 },
+                            { label: "Tu precio", data: Array(Math.min(prices.length, 15)).fill(original.price_per_night),
+                              type: "line", borderColor: "#22c55e", borderWidth: 2, borderDash: [5, 5], pointRadius: 0, fill: false }
+                        ]
+                    },
+                    options: { responsive: true, maintainAspectRatio: false, plugins: { title: { display: true, text: "Precios por Comparable", color: "#94a3b8" } },
+                        scales: { y: { beginAtZero: true, ticks: { color: "#94a3b8" }, grid: { color: "#334155" } }, x: { ticks: { color: "#94a3b8", maxRotation: 45 }, grid: { display: false } } } }
+                }));
+            }
+
+            // Portal avg bar chart
+            if (portalChartRef.current) {
+                const portalPrices = {};
+                prices.forEach(c => { portalPrices[c.source] = portalPrices[c.source] || []; portalPrices[c.source].push(c.price_per_night); });
+                const labels = Object.keys(portalPrices);
+                const data = labels.map(k => Math.round(portalPrices[k].reduce((a,b) => a+b, 0) / portalPrices[k].length));
+
+                chartsRef.current.push(new Chart(portalChartRef.current.getContext("2d"), {
+                    type: "bar",
+                    data: { labels, datasets: [{ label: "Precio promedio", data, backgroundColor: labels.map(l => colorMap[l] || "#94a3b8"), borderRadius: 6 }] },
+                    options: { responsive: true, maintainAspectRatio: false, plugins: { title: { display: true, text: "Promedio por Portal", color: "#94a3b8" } },
+                        scales: { y: { beginAtZero: true, ticks: { color: "#94a3b8" }, grid: { color: "#334155" } }, x: { ticks: { color: "#94a3b8" }, grid: { display: false } } } }
+                }));
+            }
+
+            // Pie chart: comparables por portal
+            if (portalPieRef.current && comparables.length > 0) {
+                const counts = {};
+                comparables.forEach(c => { counts[c.source] = (counts[c.source] || 0) + 1; });
+                const pieLabels = Object.keys(counts).map(k => k.charAt(0).toUpperCase() + k.slice(1));
+                const pieData = Object.values(counts);
+                const pieColors = Object.keys(counts).map(k => colorMap[k] || "#94a3b8");
+
+                chartsRef.current.push(new Chart(portalPieRef.current.getContext("2d"), {
+                    type: "doughnut",
+                    data: { labels: pieLabels, datasets: [{ data: pieData, backgroundColor: pieColors, borderColor: "#1e293b", borderWidth: 2 }] },
+                    options: { responsive: true, maintainAspectRatio: false, plugins: {
+                        title: { display: true, text: "Comparables por Portal", color: "#94a3b8" },
+                        legend: { position: "bottom", labels: { color: "#94a3b8", padding: 15 } }
+                    }}
+                }));
+            }
+
+            // Pie chart: distribucion de rangos de precio
+            if (priceRangePieRef.current && prices.length > 0) {
+                const userPrice = original.price_per_night || 0;
+                const ranges = { "Mas barato": 0, "Similar (-15% a +15%)": 0, "Mas caro": 0 };
+                const low = userPrice * 0.85;
+                const high = userPrice * 1.15;
+                prices.forEach(c => {
+                    if (c.price_per_night < low) ranges["Mas barato"]++;
+                    else if (c.price_per_night > high) ranges["Mas caro"]++;
+                    else ranges["Similar (-15% a +15%)"]++;
+                });
+                const rangeLabels = Object.keys(ranges).filter(k => ranges[k] > 0);
+                const rangeData = rangeLabels.map(k => ranges[k]);
+                const rangeColors = rangeLabels.map(k => k === "Mas barato" ? "#22c55e" : k === "Mas caro" ? "#ef4444" : "#3b82f6");
+
+                chartsRef.current.push(new Chart(priceRangePieRef.current.getContext("2d"), {
+                    type: "doughnut",
+                    data: { labels: rangeLabels, datasets: [{ data: rangeData, backgroundColor: rangeColors, borderColor: "#1e293b", borderWidth: 2 }] },
+                    options: { responsive: true, maintainAspectRatio: false, plugins: {
+                        title: { display: true, text: "Distribucion de Precios vs Tu Precio", color: "#94a3b8" },
+                        legend: { position: "bottom", labels: { color: "#94a3b8", padding: 15 } }
+                    }}
+                }));
+            }
+
+            return () => { chartsRef.current.forEach(c => { try { c.destroy(); } catch(e) {} }); };
+        }, [comparables]);
+
+        return (
+            <div>
+                <div className="card">
+                    <h2><span className="icon">📊</span> Comparacion de precios</h2>
+                    <div className="two-charts">
+                        <div className="chart-box"><canvas ref={priceChartRef}></canvas></div>
+                        <div className="chart-box"><canvas ref={portalChartRef}></canvas></div>
+                    </div>
+                    <div className="two-charts" style={{ marginTop: "1.5rem" }}>
+                        <div className="chart-box"><canvas ref={portalPieRef}></canvas></div>
+                        <div className="chart-box"><canvas ref={priceRangePieRef}></canvas></div>
+                    </div>
+                </div>
+                <div className="card">
+                    <h2><span className="icon">💡</span> Sugerencias de precio</h2>
+                    {(result.suggestions?.pricing || []).map((s, i) => <div key={i} className="suggestion">{s}</div>)}
+                </div>
+            </div>
+        );
+    }
+
+    function ComparablesTab({ result }) {
+        const comparables = result.comparables || [];
+        const original = result.original || {};
+        const currency = original.currency || "USD";
+
+        return (
+            <div className="card">
+                <h2><span className="icon">🏘️</span> {comparables.length} comparables encontrados</h2>
+                <div className="table-wrap">
+                    <table>
+                        <thead><tr><th>Portal</th><th>Titulo</th><th>Precio</th><th>Rating</th><th>Resenas</th><th>Dorm.</th></tr></thead>
+                        <tbody>
+                            <tr className="highlight">
+                                <td><span className="tag tag-portal tag-manual">TU ANUNCIO</span></td>
+                                <td>{(original.title || "").substring(0, 45)}</td>
+                                <td>{currency} {Math.round(original.price_per_night || 0)}</td>
+                                <td>{(original.rating || 0).toFixed(1)}</td>
+                                <td>{original.review_count || "-"}</td>
+                                <td>{original.bedrooms || "-"}</td>
+                            </tr>
+                            {comparables.map((c, i) => (
+                                <tr key={i}>
+                                    <td><span className={"tag tag-portal tag-" + c.source}>{c.source?.toUpperCase()}</span></td>
+                                    <td>{c.url ? <a href={c.url} target="_blank" style={{ color: "var(--primary-light)" }}>{(c.title || "").substring(0, 45)}</a> : (c.title || "").substring(0, 45)}</td>
+                                    <td>{c.price_per_night > 0 ? currency + " " + Math.round(c.price_per_night) : "-"}</td>
+                                    <td>{c.rating > 0 ? c.rating.toFixed(1) : "-"}</td>
+                                    <td>{c.review_count > 0 ? c.review_count : "-"}</td>
+                                    <td>{c.bedrooms > 0 ? c.bedrooms : "-"}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        );
+    }
+
+    function AmenitiesTab({ result }) {
+        const analysis = result.analysis || {};
+        return (
+            <div>
+                {analysis.common_amenities?.length > 0 && (
+                    <div className="card">
+                        <h2><span className="icon">📋</span> Mas comunes en la zona</h2>
+                        <div>{analysis.common_amenities.map(([name, count], i) => (
+                            <span key={i} className="tag tag-amenity">{name} ({count})</span>
+                        ))}</div>
+                    </div>
+                )}
+                {analysis.missing_amenities?.length > 0 && (
+                    <div className="card">
+                        <h2><span className="icon">⚠️</span> Te faltan</h2>
+                        <div>{analysis.missing_amenities.map((a, i) => (
+                            <span key={i} className="tag tag-missing">{a}</span>
+                        ))}</div>
+                    </div>
+                )}
+                {analysis.unique_amenities?.length > 0 && (
+                    <div className="card">
+                        <h2><span className="icon">🏆</span> Tus amenidades unicas</h2>
+                        <div>{analysis.unique_amenities.map((a, i) => (
+                            <span key={i} className="tag tag-unique">{a}</span>
+                        ))}</div>
+                    </div>
+                )}
+                <div className="card">
+                    <h2><span className="icon">💡</span> Sugerencias</h2>
+                    {(result.suggestions?.amenities || []).map((s, i) => <div key={i} className="suggestion">{s}</div>)}
+                </div>
+            </div>
+        );
+    }
+
+    function SuggestionsTab({ result }) {
+        const suggestions = result.suggestions || {};
+        const sections = [
+            ["📌", "Titulo", suggestions.title],
+            ["📝", "Descripcion", suggestions.description],
+            ["📷", "Fotos", suggestions.photos],
+            ["💡", "Generales", suggestions.general],
+        ];
+
+        return (
+            <div>
+                {sections.map(([icon, title, items], idx) => (
+                    items?.length > 0 && (
+                        <div key={idx} className="card">
+                            <h2><span className="icon">{icon}</span> {title}</h2>
+                            {items.map((s, i) => <div key={i} className="suggestion">{s}</div>)}
+                        </div>
+                    )
+                ))}
+            </div>
+        );
+    }
+
+    // ============================================
+    // RENDER
+    // ============================================
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+    </script>
+</body>
+</html>
