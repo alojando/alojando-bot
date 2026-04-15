@@ -342,13 +342,15 @@ def _parse_search_result_item(item: dict) -> Optional[ListingData]:
         # Precio por noche
         price_data = item.get("structuredDisplayPrice", {})
         if price_data:
+            # Método 1: explanationData.priceDetails (más preciso, tiene precio por noche)
             explanation = price_data.get("explanationData", {})
             if explanation:
                 price_details = explanation.get("priceDetails", [])
                 for group in price_details:
                     for detail in group.get("items", []):
-                        desc = detail.get("description", "")
-                        nightly_match = re.search(r'por \$([\d.,]+)', desc)
+                        desc = (detail.get("description", "") or "").replace("\xa0", " ")
+                        # Buscar "X noches por $Y" -> Y es el precio por noche
+                        nightly_match = re.search(r'por\s*\$([\d.,]+)', desc)
                         if nightly_match:
                             ps = nightly_match.group(1).replace(".", "").replace(",", ".")
                             try:
@@ -359,11 +361,14 @@ def _parse_search_result_item(item: dict) -> Optional[ListingData]:
                     if listing.price_per_night > 0:
                         break
 
+            # Método 2: primaryLine (total / noches)
             if listing.price_per_night == 0:
                 primary = price_data.get("primaryLine", {})
                 if primary:
-                    price_str = primary.get("price", "")
-                    qualifier = primary.get("qualifier", "")
+                    # Soportar tanto "price" como "discountedPrice" (DiscountedDisplayPriceLine)
+                    price_str = (primary.get("discountedPrice", "") or
+                                 primary.get("price", "") or "").replace("\xa0", " ")
+                    qualifier = (primary.get("qualifier", "") or "").replace("\xa0", " ")
                     match = re.search(r'\$([\d.,]+)', price_str)
                     if match:
                         total = float(match.group(1).replace(".", "").replace(",", "."))
@@ -375,26 +380,65 @@ def _parse_search_result_item(item: dict) -> Optional[ListingData]:
                         else:
                             listing.price_per_night = total
 
+            # Método 3: accessibilityLabel como fallback
+            if listing.price_per_night == 0:
+                primary = price_data.get("primaryLine", {})
+                if primary:
+                    a11y = (primary.get("accessibilityLabel", "") or "").replace("\xa0", " ")
+                    # "$97 USD por 2 noches"
+                    a11y_match = re.search(r'\$([\d.,]+)\s*\w+\s*por\s*(\d+)\s*noche', a11y)
+                    if a11y_match:
+                        total = float(a11y_match.group(1).replace(".", "").replace(",", "."))
+                        nights = int(a11y_match.group(2))
+                        if nights > 0:
+                            listing.price_per_night = round(total / nights, 2)
+
             # Moneda
             primary = price_data.get("primaryLine", {})
             if primary:
-                price_str = primary.get("price", "")
+                price_str = (primary.get("discountedPrice", "") or
+                             primary.get("price", "") or
+                             primary.get("accessibilityLabel", "") or "")
                 if "USD" in price_str:
                     listing.currency = "USD"
                 elif "EUR" in price_str:
                     listing.currency = "EUR"
+                elif "ARS" in price_str:
+                    listing.currency = "ARS"
 
-        # Habitaciones
+        # Habitaciones - buscar en primaryLine, secondaryLine y tertiaryLine
         content = item.get("structuredContent", {})
         if content:
-            for pline in content.get("primaryLine", []):
-                body = pline.get("body", "")
-                bed_match = re.search(r'(\d+)\s*dormitorio', body, re.I)
-                if bed_match:
-                    listing.bedrooms = int(bed_match.group(1))
-                beds_match = re.search(r'(\d+)\s*cama', body, re.I)
-                if beds_match:
-                    listing.beds = int(beds_match.group(1))
+            all_lines = (content.get("primaryLine", []) +
+                         content.get("secondaryLine", []) +
+                         content.get("tertiaryLine", []))
+            for pline in all_lines:
+                body = pline.get("body", "") or ""
+                if not isinstance(body, str):
+                    continue
+                if not listing.bedrooms:
+                    bed_match = re.search(r'(\d+)\s*dormitorio', body, re.I)
+                    if bed_match:
+                        listing.bedrooms = int(bed_match.group(1))
+                if not listing.beds:
+                    beds_match = re.search(r'(\d+)\s*cama', body, re.I)
+                    if beds_match:
+                        listing.beds = int(beds_match.group(1))
+                if not listing.max_guests:
+                    guests_match = re.search(r'(\d+)\s*hu[eé]sped', body, re.I)
+                    if guests_match:
+                        listing.max_guests = int(guests_match.group(1))
+                if not listing.bathrooms:
+                    bath_match = re.search(r'(\d+)\s*ba[ñn]o', body, re.I)
+                    if bath_match:
+                        listing.bathrooms = int(bath_match.group(1))
+
+        # Nombre localizado puede tener más info
+        name_loc = item.get("nameLocalized", "")
+        if isinstance(name_loc, str) and name_loc and not listing.bedrooms:
+            bed_match = re.search(r'(\d+)\s*dormitorio', name_loc, re.I)
+            if bed_match:
+                listing.bedrooms = int(bed_match.group(1))
 
         # Fotos
         pictures = item.get("contextualPictures", [])
