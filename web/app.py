@@ -217,17 +217,17 @@ def start_browser_assisted_analysis():
             listing = extract_from_url(listing_url, html=listing_html)
         else:
             listing = extract_from_url(listing_url)
-        # Apply manual price if extractor could not get it
-        if manual_price > 0 and listing.price_per_night == 0:
+        # Datos manuales del usuario SIEMPRE sobreescriben lo del parser
+        # (el usuario sabe mejor cuántos dormitorios/huéspedes tiene)
+        if manual_price > 0:
             listing.price_per_night = manual_price
         if currency:
             listing.currency = currency
-        # Apply manual property type, bedrooms and amenities
-        if manual_property_type and not listing.property_type:
+        if manual_property_type:
             listing.property_type = manual_property_type
-        if manual_bedrooms > 0 and listing.bedrooms == 0:
+        if manual_bedrooms > 0:
             listing.bedrooms = manual_bedrooms
-        if manual_max_guests > 0 and listing.max_guests == 0:
+        if manual_max_guests > 0:
             listing.max_guests = manual_max_guests
         if manual_amenities:
             existing = set(listing.amenities) if listing.amenities else set()
@@ -591,21 +591,68 @@ def _serialize_result(result):
     }
 
 
+def _simplify_address(address: str) -> list:
+    """
+    Genera variantes simplificadas de una dirección para mejorar geocodificación.
+    Nominatim falla con abreviaturas (Pres., Cdad.), códigos postales, etc.
+    """
+    import re
+    variants = [address]
+
+    # Limpiar abreviaturas comunes argentinas
+    cleaned = address
+    cleaned = re.sub(r'\bPres\.\s*', '', cleaned)
+    cleaned = re.sub(r'\bGral\.\s*', '', cleaned)
+    cleaned = re.sub(r'\bDr\.\s*', '', cleaned)
+    cleaned = re.sub(r'\bAv\.\s*', 'Avenida ', cleaned)
+    cleaned = re.sub(r'\bCdad\.\s*Autónoma\s*de\s*', '', cleaned)
+    cleaned = re.sub(r'\bC\.?\s*A\.?\s*B\.?\s*A\.?\s*', 'Buenos Aires', cleaned)
+    # Quitar código postal (ej: C1035, B1234ABC)
+    cleaned = re.sub(r'\b[A-Z]?\d{4}[A-Z]{0,3}\b', '', cleaned)
+    # Limpiar espacios dobles y comas sueltas
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    cleaned = re.sub(r',\s*,', ',', cleaned)
+    cleaned = cleaned.strip(', ')
+
+    if cleaned != address:
+        variants.append(cleaned)
+
+    # Variante solo con barrio + ciudad + país
+    parts = [p.strip() for p in address.split(',')]
+    if len(parts) >= 3:
+        # Últimos 2-3 segmentos (barrio, ciudad, país)
+        variants.append(', '.join(parts[-3:]))
+        variants.append(', '.join(parts[-2:]))
+
+    return variants
+
+
 def _geocode_address(address: str):
-    """Geocodifica una dirección usando Nominatim (OpenStreetMap)."""
+    """Geocodifica una dirección usando Nominatim (OpenStreetMap).
+    Intenta con la dirección original y variantes simplificadas."""
     import requests as req
-    try:
-        resp = req.get(
-            "https://nominatim.openstreetmap.org/search",
-            params={"q": address, "format": "json", "limit": 1},
-            headers={"User-Agent": "AlojandoBot/2.1"},
-            timeout=10,
-        )
-        results = resp.json()
-        if results:
-            return float(results[0]["lat"]), float(results[0]["lon"])
-    except Exception as e:
-        logger.warning("Geocoding failed for '%s': %s", address, e)
+
+    variants = _simplify_address(address)
+
+    for variant in variants:
+        try:
+            resp = req.get(
+                "https://nominatim.openstreetmap.org/search",
+                params={"q": variant, "format": "json", "limit": 1,
+                        "countrycodes": "ar,uy,br,cl,py,bo,pe,co,ec,mx,es"},
+                headers={"User-Agent": "AlojandoBot/2.5"},
+                timeout=10,
+            )
+            results = resp.json()
+            if results:
+                lat, lon = float(results[0]["lat"]), float(results[0]["lon"])
+                logger.info("Geocoded '%s' -> %s, %s (variante: '%s')", address[:50], lat, lon, variant[:50])
+                return lat, lon
+        except Exception as e:
+            logger.debug("Geocoding attempt failed for '%s': %s", variant[:50], e)
+            continue
+
+    logger.warning("Geocoding failed for all variants of '%s'", address[:50])
     return None
 
 
