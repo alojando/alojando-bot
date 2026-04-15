@@ -136,7 +136,7 @@ def _validate_url(url: str) -> tuple:
 
 @app.route("/api/health", methods=["GET"])
 def health():
-    return jsonify({"status": "ok", "version": "2.1.0", "docx_available": DOCX_AVAILABLE, "playwright_available": PLAYWRIGHT_AVAILABLE})
+    return jsonify({"status": "ok", "version": "2.5.0", "docx_available": DOCX_AVAILABLE, "playwright_available": PLAYWRIGHT_AVAILABLE})
 
 
 @app.route("/api/analyze", methods=["POST"])
@@ -613,7 +613,7 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     debug = os.environ.get("FLASK_DEBUG", "false").lower() == "true"
     print("\n" + "=" * 50)
-    print("  ALOJANDO BOT - Servidor Web v2.1")
+    print("  ALOJANDO BOT - Servidor Web v2.5")
     print("  http://localhost:%d" % port)
     if PLAYWRIGHT_AVAILABLE:
         print("  Playwright: DISPONIBLE (multi-portal)")
