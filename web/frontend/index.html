@@ -232,7 +232,7 @@
             // For URL mode: use browser-assisted flow
             if (payload.mode === "url") {
                 try {
-                    await runBrowserAssistedAnalysis(payload.url, payload.price, payload.currency, payload.address, payload.radius_meters, payload.max_comparables || 20, payload.bedrooms || 0, payload.max_guests || 0, payload.amenities || [], payload.property_type || "", payload.portals || ["airbnb","booking","google","vrbo"], payload.checkin || "", payload.checkout || "");
+                    await runBrowserAssistedAnalysis(payload.url, payload.price, payload.currency, payload.address, payload.radius_meters, payload.max_comparables || 20, payload.bedrooms || 0, payload.max_guests || 0, payload.amenities || [], payload.property_type || "", payload.portals || ["airbnb","booking","google","vrbo"], payload.checkin || "", payload.checkout || "", payload.compare_with_hotels || false);
                 } catch (err) {
                     alert("Error: " + err.message);
                     setView("form");
@@ -263,7 +263,7 @@
             }
         };
 
-        const runBrowserAssistedAnalysis = async (url, manualPrice, currency, address, radiusMeters, maxComps, bedrooms, maxGuests, amenities, propertyType, portals, checkin, checkout) => {
+        const runBrowserAssistedAnalysis = async (url, manualPrice, currency, address, radiusMeters, maxComps, bedrooms, maxGuests, amenities, propertyType, portals, checkin, checkout, compareHotels) => {
             // Step 1: Fetch the listing page via proxy
             // For Airbnb: add dates to URL to get pricing data
             let fetchUrl = url;
@@ -322,8 +322,12 @@
             const portalStatus = [];
             const AIRBNB_PER_PAGE = 18;
             const pagesNeeded = (portal) => {
-                if (portal === "airbnb" && maxComps > AIRBNB_PER_PAGE) {
-                    return Math.ceil(maxComps / AIRBNB_PER_PAGE);
+                if (portal === "airbnb") {
+                    // Airbnb no respeta bien los filtros de dormitorios en la URL,
+                    // asi que pedimos mas paginas para compensar el filtrado posterior.
+                    // Con 20 comparables pedidos, necesitamos al menos 2-3 paginas.
+                    const minPages = Math.max(2, Math.ceil(maxComps / AIRBNB_PER_PAGE));
+                    return Math.min(minPages, 4); // max 4 paginas
                 }
                 return 1;
             };
@@ -389,6 +393,7 @@
                     max_guests: maxGuests || 0,
                     property_type: propertyType || "",
                     amenities: amenities || [],
+                    compare_with_hotels: compareHotels || false,
                 }),
             });
             const analysisData = await analysisRes.json();
@@ -518,6 +523,7 @@
         const [urlWasher, setUrlWasher] = useState(false);
         const [urlCheckin, setUrlCheckin] = useState("");
         const [urlCheckout, setUrlCheckout] = useState("");
+        const [compareWithHotels, setCompareWithHotels] = useState(false);
         const [selectedPortals, setSelectedPortals] = useState({ airbnb: true, booking: true, google: true, vrbo: true });
         const togglePortal = (p) => setSelectedPortals(prev => ({ ...prev, [p]: !prev[p] }));
         const [formData, setFormData] = useState({
@@ -555,6 +561,7 @@
                     portals: portals,
                     checkin: urlCheckin || "",
                     checkout: urlCheckout || "",
+                    compare_with_hotels: compareWithHotels,
                 });
             } else {
                 if (!formData.city) { alert("La ciudad es obligatoria"); return; }
@@ -622,6 +629,19 @@
                                 <label>Huespedes max.</label>
                                 <input type="number" min="1" max="30" value={urlMaxGuests} onChange={e => setUrlMaxGuests(e.target.value)}
                                     placeholder="Ej: 4" />
+                            </div>
+                        </div>
+                        <div className="form-group">
+                            <label>Comparar con hoteles</label>
+                            <div style={{ display: "flex", gap: "0.5rem" }}>
+                                <button type="button" className={!compareWithHotels ? "btn btn-primary" : "btn btn-secondary"}
+                                    onClick={() => setCompareWithHotels(false)} style={{ flex: 1, padding: "0.5rem" }}>
+                                    No (solo alquileres)
+                                </button>
+                                <button type="button" className={compareWithHotels ? "btn btn-primary" : "btn btn-secondary"}
+                                    onClick={() => setCompareWithHotels(true)} style={{ flex: 1, padding: "0.5rem" }}>
+                                    Si (incluir hoteles)
+                                </button>
                             </div>
                         </div>
                         <div className="form-group">

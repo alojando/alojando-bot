@@ -346,8 +346,11 @@ def _parse_booking_search(html: str) -> List[ListingData]:
             if review_match:
                 listing.review_count = int(review_match.group(1))
 
-        # Extraer dormitorios, huéspedes y baños del texto del card
+        # Extraer dormitorios, huéspedes, baños y tipo de propiedad del texto del card
         card_text = card.get_text(separator=" ", strip=True)
+
+        # Tipo de propiedad: detectar si es hotel
+        _detect_property_type(listing, card_text)
 
         # Dormitorios: "1 dormitorio", "2 bedrooms", "Studio"
         if listing.bedrooms == 0:
@@ -482,6 +485,7 @@ def _parse_google_search(html: str) -> List[ListingData]:
     rental_titles = soup.find_all("h2", class_=re.compile(r"BgYkof"))
     for title_el in rental_titles:
         listing = ListingData(source="google")
+        listing.property_type = "vacation_rental"
         listing.title = title_el.get_text(strip=True)
 
         # Buscar el <a> padre que envuelve toda la card (link a detalle)
@@ -551,6 +555,7 @@ def _parse_google_search(html: str) -> List[ListingData]:
             continue
 
         listing = ListingData(source="google")
+        listing.property_type = "hotel"
 
         # El primer texto largo suele ser el nombre
         name_el = card.find("div", class_=re.compile(r"ogfYpf"))
@@ -610,7 +615,8 @@ def _parse_google_search(html: str) -> List[ListingData]:
 # DIRECT MODE (fallback, puede fallar)
 # ============================================
 
-def search_all_portals(listing: ListingData, portals: list = None) -> dict:
+def search_all_portals(listing: ListingData, portals: list = None,
+                       compare_with_hotels: bool = False, user_property_type: str = "") -> dict:
     """
     Busca comparables directamente (puede fallar con portales que bloquean bots).
 
@@ -620,6 +626,8 @@ def search_all_portals(listing: ListingData, portals: list = None) -> dict:
     Args:
         listing: El anuncio original
         portals: Lista de portales
+        compare_with_hotels: Si True, incluir hoteles en comparables
+        user_property_type: Tipo de propiedad del usuario
 
     Returns:
         Dict con portal como key y lista de ListingData como value
@@ -658,7 +666,8 @@ def search_all_portals(listing: ListingData, portals: list = None) -> dict:
 # BROWSER-ASSISTED SEARCH (para el web app)
 # ============================================
 
-def search_with_browser_html(listing: ListingData, portal_html: Dict[str, str], max_results: int = 0) -> dict:
+def search_with_browser_html(listing: ListingData, portal_html: Dict[str, str], max_results: int = 0,
+                             compare_with_hotels: bool = False, user_property_type: str = "") -> dict:
     """
     Parsea HTML de búsqueda proporcionado por el browser del usuario.
     Normaliza todos los precios a la moneda del listing original.
@@ -714,7 +723,9 @@ def search_with_browser_html(listing: ListingData, portal_html: Dict[str, str], 
                 results = [r for r in results if r.listing_id != listing.listing_id]
 
             # Filtrar por similitud: descartar propiedades muy diferentes
-            results = _filter_similar(results, listing)
+            results = _filter_similar(results, listing,
+                                     compare_with_hotels=compare_with_hotels,
+                                     user_property_type=user_property_type)
 
             post_filter_count = len(results)
             if pre_filter_count != post_filter_count:
@@ -784,10 +795,59 @@ def _infer_guests_from_text(text: str) -> int:
     return 0
 
 
+_HOTEL_KEYWORDS = [
+    "hotel", "hostel", "hostal", "resort", "inn", "posada",
+    "hostería", "hosteria", "motel", "b&b", "bed and breakfast",
+    "bed & breakfast", "pension", "pensión", "albergue",
+]
+
+_APARTHOTEL_KEYWORDS = [
+    "apart-hotel", "aparthotel", "apart hotel", "apartotel",
+]
+
+
+def _detect_property_type(listing: ListingData, text: str = ""):
+    """Detecta si un listing es hotel, apartamento, casa, etc. desde el texto."""
+    if listing.property_type and listing.property_type not in ("", "vacation_rental"):
+        return  # Ya tiene tipo asignado
+
+    check_text = " ".join(filter(None, [listing.title, text])).lower()
+    if not check_text:
+        return
+
+    # Apart-hotel es un caso especial: tiene "hotel" pero es un apartamento
+    for kw in _APARTHOTEL_KEYWORDS:
+        if kw in check_text:
+            listing.property_type = "aparthotel"
+            return
+
+    # Hoteles
+    for kw in _HOTEL_KEYWORDS:
+        # Match word boundary: "hotel" pero no "hoteles" falso positivo en "Photoloft"
+        if re.search(r'\b' + re.escape(kw) + r'\b', check_text):
+            listing.property_type = "hotel"
+            return
+
+    # Casas
+    if re.search(r'\b(casa|house|villa|chalet|cabaña|cabana|cabin)\b', check_text):
+        listing.property_type = "casa"
+        return
+
+    # Departamentos/apartamentos
+    if re.search(r'\b(apartamento|apartment|depto|departamento|flat|piso)\b', check_text):
+        listing.property_type = "apartamento"
+        return
+
+    # Estudios
+    if re.search(r'\b(estudio|studio|monoambiente|loft)\b', check_text):
+        listing.property_type = "estudio"
+        return
+
+
 def _enrich_listing_from_text(listing: ListingData) -> ListingData:
     """
-    Enriquece un listing intentando extraer dormitorios y huéspedes
-    del título y otros textos disponibles.
+    Enriquece un listing intentando extraer dormitorios, huéspedes
+    y tipo de propiedad del título y otros textos disponibles.
     """
     text = " ".join(filter(None, [listing.title, listing.description]))
 
@@ -803,17 +863,53 @@ def _enrich_listing_from_text(listing: ListingData) -> ListingData:
             listing.max_guests = inferred
             logger.debug(f"Inferido {inferred} huespedes de texto: {listing.title}")
 
+    # Inferir property_type si no se tiene
+    _detect_property_type(listing, text)
+
     return listing
 
 
-def _filter_similar(results: List[ListingData], listing: ListingData) -> List[ListingData]:
+def _is_hotel_type(property_type: str, title: str = "") -> bool:
+    """Determina si un listing es de tipo hotel/hostel."""
+    check = (property_type or "").lower()
+    if check in ("hotel", "hostel", "hostal", "resort", "motel", "inn", "posada",
+                  "hostería", "hosteria", "albergue", "b&b", "pension", "pensión"):
+        return True
+    # Verificar también en el título
+    title_lower = (title or "").lower()
+    for kw in _HOTEL_KEYWORDS:
+        if re.search(r'\b' + re.escape(kw) + r'\b', title_lower):
+            # Excepto apart-hotel que es un apartamento
+            if any(ak in title_lower for ak in _APARTHOTEL_KEYWORDS):
+                return False
+            return True
+    return False
+
+
+def _property_type_compatible(user_type: str, comp_type: str) -> bool:
+    """
+    Verifica si el tipo de propiedad del comparable es compatible con el del usuario.
+
+    NOTA: No filtramos apartamento vs casa porque los portales clasifican
+    inconsistentemente (Booking llama "casa" a muchos departamentos).
+    Solo filtramos el caso hotel vs no-hotel, que se maneja aparte.
+    """
+    # No filtrar por tipo entre alquileres temporarios - los portales son inconsistentes
+    # El filtro de hoteles ya se encarga de excluir hoteles/hosteles
+    return True
+
+
+def _filter_similar(results: List[ListingData], listing: ListingData,
+                    compare_with_hotels: bool = False, user_property_type: str = "") -> List[ListingData]:
     """
     Filtra resultados para quedarse solo con propiedades similares al listing original.
 
     Criterios:
+    - Hoteles: excluir si compare_with_hotels=False
+    - Tipo de propiedad: apartamentos solo con apartamentos, casas solo con casas
     - Dormitorios: match exacto cuando ambos tienen datos; inferir de título si falta
-    - Huéspedes: máximo +2 personas de diferencia (no el doble)
-    - Precio: rango más ajustado (0.3x a 3x)
+    - Huéspedes: máximo +2 personas de diferencia
+    - Precio: rango ajustado (0.3x a 3x)
     - Si no hay datos de dormitorios ni huéspedes, usar el precio como proxy
     """
     if not results:
@@ -822,50 +918,72 @@ def _filter_similar(results: List[ListingData], listing: ListingData) -> List[Li
     user_bedrooms = listing.bedrooms if listing.bedrooms is not None else -1
     user_guests = listing.max_guests or 0
     user_price = listing.price_per_night or 0
+    effective_property_type = user_property_type or listing.property_type or ""
     filtered = []
+    reject_reasons = {"hotel": 0, "tipo": 0, "dormitorios": 0, "huespedes": 0, "precio": 0, "proxy": 0}
 
     for r in results:
         # Enriquecer el comparable con datos inferidos del título
         _enrich_listing_from_text(r)
 
-        # --- Filtro por dormitorios ---
-        if user_bedrooms >= 0 and r.bedrooms > 0:
-            # Match exacto: 1 dormitorio solo compara con 1 dormitorio
-            if r.bedrooms != user_bedrooms:
-                logger.debug(f"Filtrado por dormitorios: {r.title} ({r.bedrooms} dorm vs {user_bedrooms})")
+        # --- Filtro de hoteles ---
+        if not compare_with_hotels:
+            if _is_hotel_type(r.property_type, r.title):
+                logger.debug(f"Filtrado por hotel: {r.title} (tipo={r.property_type})")
+                reject_reasons["hotel"] += 1
                 continue
 
-        # --- Filtro por huéspedes (más estricto) ---
+        # --- Filtro por tipo de propiedad ---
+        if effective_property_type and r.property_type:
+            if not _property_type_compatible(effective_property_type, r.property_type):
+                logger.debug(f"Filtrado por tipo: {r.title} (tipo={r.property_type} vs user={effective_property_type})")
+                reject_reasons["tipo"] += 1
+                continue
+
+        # --- Filtro por dormitorios (tolerancia ±1) ---
+        # Match exacto es ideal pero demasiado restrictivo porque los portales
+        # no respetan bien los filtros de dormitorios en la URL.
+        # Permitimos ±1 dormitorio para tener suficientes comparables.
+        if user_bedrooms >= 0 and r.bedrooms > 0:
+            diff = abs(r.bedrooms - user_bedrooms)
+            if diff > 1:
+                logger.debug(f"Filtrado por dormitorios: {r.title} ({r.bedrooms} dorm vs {user_bedrooms})")
+                reject_reasons["dormitorios"] += 1
+                continue
+
+        # --- Filtro por huéspedes ---
+        # Tolerancia coherente con ±1 dormitorio: +4 arriba, mitad abajo
         if user_guests > 0 and r.max_guests > 0:
-            # Máximo +2 personas arriba, no menos de la mitad abajo
-            if r.max_guests > user_guests + 2:
+            if r.max_guests > user_guests + 4:
                 logger.debug(f"Filtrado por huespedes (muy grande): {r.title} ({r.max_guests} vs {user_guests})")
+                reject_reasons["huespedes"] += 1
                 continue
             if r.max_guests < max(1, user_guests // 2):
                 logger.debug(f"Filtrado por huespedes (muy chico): {r.title} ({r.max_guests} vs {user_guests})")
+                reject_reasons["huespedes"] += 1
                 continue
 
-        # --- Filtro por precio (más ajustado) ---
+        # --- Filtro por precio (ajustado) ---
         if user_price > 0 and r.price_per_night > 0:
             ratio = r.price_per_night / user_price
             if ratio > 3.0 or ratio < 0.3:
                 logger.debug(f"Filtrado por precio extremo: {r.title} ({r.price_per_night} vs {user_price})")
+                reject_reasons["precio"] += 1
                 continue
 
-        # --- Filtro de seguridad: si no tenemos datos de dormitorios del comparable,
-        #     usar el precio como proxy de tamaño ---
+        # --- Filtro de seguridad: precio como proxy de tamaño ---
         if user_bedrooms >= 0 and r.bedrooms == 0 and r.max_guests == 0:
-            # Sin datos de tamaño del comparable. Si el precio es > 2.5x del usuario,
-            # probablemente sea una propiedad mucho más grande.
             if user_price > 0 and r.price_per_night > 0:
                 if r.price_per_night > user_price * 2.5:
                     logger.debug(f"Filtrado por precio/tamaño proxy: {r.title} ({r.price_per_night} vs {user_price})")
+                    reject_reasons["proxy"] += 1
                     continue
 
         filtered.append(r)
 
     removed = len(results) - len(filtered)
     if removed > 0:
-        logger.info(f"Filtro de similitud: {removed} descartados, {len(filtered)} conservados de {len(results)}")
+        reasons_str = ", ".join(f"{k}={v}" for k, v in reject_reasons.items() if v > 0)
+        logger.info(f"Filtro: {len(filtered)}/{len(results)} conservados (rechazados: {reasons_str})")
 
     return filtered

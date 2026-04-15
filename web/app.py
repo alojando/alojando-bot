@@ -200,6 +200,7 @@ def start_browser_assisted_analysis():
     manual_max_guests = int(data.get("max_guests", 0) or 0)
     manual_property_type = data.get("property_type", "")
     manual_amenities = data.get("amenities", [])
+    compare_with_hotels = bool(data.get("compare_with_hotels", False))
 
     if not listing_html and not listing_url:
         return jsonify({"error": "Se requiere listing_url o listing_html"}), 400
@@ -236,7 +237,9 @@ def start_browser_assisted_analysis():
     except Exception as e:
         return jsonify({"error": "Error al extraer datos: " + str(e)}), 400
 
-    thread = Thread(target=_run_browser_assisted_analysis, args=(analysis_id, listing, search_html, max_comparables))
+    thread = Thread(target=_run_browser_assisted_analysis,
+                    args=(analysis_id, listing, search_html, max_comparables,
+                          compare_with_hotels, manual_property_type))
     thread.daemon = True
     thread.start()
 
@@ -452,9 +455,12 @@ def _run_analysis(analysis_id, listing, portals, is_demo):
     _run_analysis_common(analysis_id, listing, get_results, "Buscando comparables en portales...", 20)
 
 
-def _run_browser_assisted_analysis(analysis_id, listing, search_html, max_comparables=20):
+def _run_browser_assisted_analysis(analysis_id, listing, search_html, max_comparables=20,
+                                    compare_with_hotels=False, user_property_type=""):
     def get_results():
-        return search_with_browser_html(listing, search_html, max_results=max_comparables)
+        return search_with_browser_html(listing, search_html, max_results=max_comparables,
+                                       compare_with_hotels=compare_with_hotels,
+                                       user_property_type=user_property_type)
     _run_analysis_common(analysis_id, listing, get_results, "Parseando resultados de portales...", 30)
 
 
