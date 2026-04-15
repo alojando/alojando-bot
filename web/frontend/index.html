@@ -323,11 +323,11 @@
             const AIRBNB_PER_PAGE = 18;
             const pagesNeeded = (portal) => {
                 if (portal === "airbnb") {
-                    // Airbnb no respeta bien los filtros de dormitorios en la URL,
-                    // asi que pedimos mas paginas para compensar el filtrado posterior.
-                    // Con 20 comparables pedidos, necesitamos al menos 2-3 paginas.
-                    const minPages = Math.max(2, Math.ceil(maxComps / AIRBNB_PER_PAGE));
-                    return Math.min(minPages, 4); // max 4 paginas
+                    // Airbnb ignora los filtros de dormitorios en la URL y devuelve
+                    // resultados mixtos. Necesitamos pedir muchas mas paginas porque
+                    // nuestro filtro post-parseo descarta ~80% por dormitorios.
+                    // Con 20 comparables pedidos y ~20% de match, necesitamos ~100 raw → 5-6 paginas
+                    return Math.min(Math.max(3, Math.ceil((maxComps * 5) / AIRBNB_PER_PAGE)), 6);
                 }
                 return 1;
             };

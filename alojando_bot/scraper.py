@@ -133,12 +133,13 @@ def _get_search_url(portal: str, listing: ListingData, location: str, bbox: dict
         params.append(f"checkout={checkout}")
         if listing.max_guests > 0:
             params.append(f"adults={min(listing.max_guests, 16)}")
-        # Filtrar por dormitorios exactos
+        # Filtrar por dormitorios exactos en la URL.
+        # Airbnb no siempre respeta este filtro, pero ayuda a mejorar los resultados.
+        # El filtro post-parseo (_filter_similar con ±1) es el que realmente filtra.
         if bedrooms > 0:
             params.append(f"min_bedrooms={bedrooms}")
             params.append(f"max_bedrooms={bedrooms}")
         elif bedrooms == 0:
-            # Estudio/monoambiente: 0 dormitorios
             params.append("min_bedrooms=0")
             params.append("max_bedrooms=0")
             params.append("room_types%5B%5D=Entire+home%2Fapt")
@@ -169,9 +170,8 @@ def _get_search_url(portal: str, listing: ListingData, location: str, bbox: dict
         params.append(f"checkout={checkout}")
         if listing.max_guests > 0:
             params.append(f"group_adults={listing.max_guests}")
-        # Booking: filtro por dormitorios (nflt=entire_place_bedroom_count%3DX)
-        if bedrooms > 0:
-            params.append(f"nflt=entire_place_bedroom_count%3D{bedrooms}")
+        # Booking: no filtrar por dormitorios exactos en la URL porque
+        # Booking tampoco los respeta bien. Nuestro filtro post-parseo se encarga.
         # Booking soporta lat/lng con radio
         if bbox:
             center_lat = (bbox['ne_lat'] + bbox['sw_lat']) / 2
