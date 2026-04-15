@@ -940,21 +940,21 @@ def _filter_similar(results: List[ListingData], listing: ListingData,
                 reject_reasons["tipo"] += 1
                 continue
 
-        # --- Filtro por dormitorios (tolerancia ±1) ---
-        # Match exacto es ideal pero demasiado restrictivo porque los portales
-        # no respetan bien los filtros de dormitorios en la URL.
-        # Permitimos ±1 dormitorio para tener suficientes comparables.
+        # --- Filtro por dormitorios (tolerancia ±2) ---
+        # Los portales no respetan los filtros de dormitorios en la URL y devuelven
+        # resultados mixtos. Permitimos ±2 para tener suficientes comparables.
+        # Un 3-dorm es razonablemente comparable a un 1-dorm en la misma zona.
         if user_bedrooms >= 0 and r.bedrooms > 0:
             diff = abs(r.bedrooms - user_bedrooms)
-            if diff > 1:
+            if diff > 2:
                 logger.debug(f"Filtrado por dormitorios: {r.title} ({r.bedrooms} dorm vs {user_bedrooms})")
                 reject_reasons["dormitorios"] += 1
                 continue
 
         # --- Filtro por huéspedes ---
-        # Tolerancia coherente con ±1 dormitorio: +4 arriba, mitad abajo
+        # Tolerancia coherente con ±2 dormitorios: +6 arriba, mitad abajo
         if user_guests > 0 and r.max_guests > 0:
-            if r.max_guests > user_guests + 4:
+            if r.max_guests > user_guests + 6:
                 logger.debug(f"Filtrado por huespedes (muy grande): {r.title} ({r.max_guests} vs {user_guests})")
                 reject_reasons["huespedes"] += 1
                 continue
