@@ -665,7 +665,7 @@
                         <div className="form-group">
                             <label>Radio de busqueda</label>
                             <div className="btn-group-responsive" style={{ display: "flex", gap: "0.5rem" }}>
-                                {[{v: "500", l: "500m"}, {v: "1000", l: "1 km"}, {v: "5000", l: "5 km"}, {v: "10000", l: "10 km"}].map(opt => (
+                                {[{v: "1000", l: "1 km"}, {v: "3000", l: "3 km"}, {v: "5000", l: "5 km (recomendado)"}, {v: "10000", l: "10 km"}].map(opt => (
                                     <button key={opt.v} type="button" className={searchRadius === opt.v ? "btn btn-primary" : "btn btn-secondary"}
                                         onClick={() => setSearchRadius(opt.v)}
                                         style={{ flex: 1, padding: "0.5rem" }}>
