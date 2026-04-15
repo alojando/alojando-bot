@@ -737,7 +737,85 @@ def search_with_browser_html(listing: ListingData, portal_html: Dict[str, str], 
             logger.warning(f"{portal}: No se recibió HTML")
             all_results[portal] = []
 
+    # Enriquecer listings de Airbnb con datos de la página individual
+    # Solo para los que pasaron el filtro (máx ~20), para no hacer demasiados fetches
+    airbnb_results = all_results.get("airbnb", [])
+    if airbnb_results:
+        enriched = _enrich_airbnb_with_details(airbnb_results, max_fetch=15)
+        all_results["airbnb"] = enriched
+
     return all_results
+
+
+def _enrich_airbnb_with_details(listings: List[ListingData], max_fetch: int = 15) -> List[ListingData]:
+    """
+    Enriquece listings de Airbnb fetcheando la página individual de cada uno.
+    Extrae: amenidades, huéspedes exactos, baños, fotos, descripción.
+    Solo fetchea listings que les faltan datos clave.
+    """
+    try:
+        from .browser_fetch import is_available as pw_available, fetch_page as pw_fetch
+        if not pw_available():
+            logger.info("Playwright no disponible, saltando enriquecimiento de Airbnb")
+            return listings
+    except ImportError:
+        return listings
+
+    from .extractor import extract_from_url
+
+    needs_enrichment = [l for l in listings if not l.amenities or l.max_guests == 0 or l.bathrooms == 0]
+    to_fetch = needs_enrichment[:max_fetch]
+
+    if not to_fetch:
+        logger.info("Airbnb: todos los listings ya tienen datos completos")
+        return listings
+
+    logger.info(f"Airbnb: enriqueciendo {len(to_fetch)} listings con datos individuales...")
+    enriched_count = 0
+
+    for listing in to_fetch:
+        if not listing.url:
+            continue
+        try:
+            # Agregar fechas a la URL para obtener precio
+            fetch_url = listing.url
+            if "?" not in fetch_url:
+                fetch_url += "?checkin=2026-04-22&checkout=2026-04-24&adults=2"
+
+            result = pw_fetch(fetch_url, wait_seconds=4, timeout=30)
+            if not result.get("success") or result.get("content_length", 0) < 5000:
+                continue
+
+            detail = extract_from_url(listing.url, html=result["html"])
+
+            # Copiar datos que faltan (no sobreescribir los que ya tenemos)
+            if detail.amenities and not listing.amenities:
+                listing.amenities = detail.amenities
+            if detail.max_guests > 0 and listing.max_guests <= 0:
+                listing.max_guests = detail.max_guests
+            if detail.bathrooms > 0 and listing.bathrooms <= 0:
+                listing.bathrooms = detail.bathrooms
+            if detail.bedrooms > 0 and listing.bedrooms <= 0:
+                listing.bedrooms = detail.bedrooms
+            if detail.beds > 0 and listing.beds <= 0:
+                listing.beds = detail.beds
+            if detail.description and not listing.description:
+                listing.description = detail.description
+            if detail.photo_count > listing.photo_count:
+                listing.photo_count = detail.photo_count
+                listing.photos = detail.photos
+            if detail.property_type and not listing.property_type:
+                listing.property_type = detail.property_type
+
+            enriched_count += 1
+            logger.debug(f"Enriquecido: {listing.title[:40]} -> amenities={len(listing.amenities)}, "
+                        f"guests={listing.max_guests}, baths={listing.bathrooms}")
+        except Exception as e:
+            logger.warning(f"Error al enriquecer {listing.title[:30]}: {e}")
+            continue
+
+    logger.info(f"Airbnb: {enriched_count}/{len(to_fetch)} listings enriquecidos con datos individuales")
+    return listings
 
 
 def _infer_bedrooms_from_text(text: str) -> int:
@@ -862,6 +940,11 @@ def _enrich_listing_from_text(listing: ListingData) -> ListingData:
         if inferred > 0:
             listing.max_guests = inferred
             logger.debug(f"Inferido {inferred} huespedes de texto: {listing.title}")
+
+    # Estimar huéspedes desde dormitorios si no tenemos el dato
+    if listing.max_guests == 0 and listing.bedrooms > 0:
+        listing.max_guests = listing.bedrooms * 2 + 1
+        logger.debug(f"Estimado {listing.max_guests} huespedes desde {listing.bedrooms} dorms: {listing.title}")
 
     # Inferir property_type si no se tiene
     _detect_property_type(listing, text)

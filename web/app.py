@@ -422,7 +422,7 @@ def _run_analysis_common(analysis_id, listing, portal_results_fn, search_progres
         portal_results = portal_results_fn()
         total = sum(len(v) for v in portal_results.values())
         portal_detail = ", ".join(f"{p}: {len(v)}" for p, v in portal_results.items() if v)
-        _update_analysis(analysis_id, progress=60,
+        _update_analysis(analysis_id, progress=70,
                         message="Encontrados %d comparables (%s). Analizando..." % (total, portal_detail) if portal_detail else "Encontrados %d comparables. Analizando..." % total)
         result = analyze(listing, portal_results)
         _update_analysis(analysis_id, progress=80, message="Generando informes...")
