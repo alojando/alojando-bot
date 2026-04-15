@@ -6,8 +6,11 @@ import sys
 import json
 import logging
 import uuid
+import ipaddress
+import socket
 from datetime import datetime
-from threading import Thread
+from threading import Thread, Lock
+from urllib.parse import urlparse
 
 from flask import Flask, request, jsonify, send_from_directory, send_file
 from flask_cors import CORS
@@ -41,10 +44,94 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__, static_folder="frontend/build", static_url_path="")
-CORS(app)
 
+# CORS: restringir a orígenes conocidos (localhost para dev, Railway para prod)
+allowed_origins = os.environ.get("CORS_ORIGINS", "").split(",") if os.environ.get("CORS_ORIGINS") else None
+if allowed_origins:
+    CORS(app, origins=allowed_origins)
+else:
+    # En desarrollo, permitir localhost en cualquier puerto
+    CORS(app, origins=[
+        r"http://localhost:\d+",
+        r"http://127\.0\.0\.1:\d+",
+    ])
+
+# Rate limiting
+try:
+    from flask_limiter import Limiter
+    from flask_limiter.util import get_remote_address
+    limiter = Limiter(get_remote_address, app=app, default_limits=["200 per hour"])
+except ImportError:
+    limiter = None
+    logger.warning("flask-limiter no instalado - sin rate limiting")
+
+# Thread-safe analyses storage
 analyses = {}
+_analyses_lock = Lock()
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+
+def _set_analysis(analysis_id, data):
+    """Thread-safe update de análisis."""
+    with _analyses_lock:
+        analyses[analysis_id] = data
+
+
+def _update_analysis(analysis_id, **kwargs):
+    """Thread-safe partial update de análisis."""
+    with _analyses_lock:
+        if analysis_id in analyses:
+            analyses[analysis_id].update(kwargs)
+
+
+def _get_analysis(analysis_id):
+    """Thread-safe get de análisis."""
+    with _analyses_lock:
+        return analyses.get(analysis_id, {}).copy()
+
+
+def _validate_url(url: str) -> tuple:
+    """
+    Valida una URL para prevenir SSRF.
+    Returns: (is_valid: bool, error_message: str)
+    """
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return False, "URL inválida"
+
+    if parsed.scheme not in ("http", "https"):
+        return False, "Solo se permiten URLs HTTP/HTTPS"
+
+    hostname = parsed.hostname
+    if not hostname:
+        return False, "URL sin hostname"
+
+    # Bloquear hosts internos
+    blocked_hosts = {"localhost", "127.0.0.1", "0.0.0.0", "::1", "[::1]"}
+    if hostname.lower() in blocked_hosts:
+        return False, "No se permiten URLs internas"
+
+    # Bloquear IPs privadas
+    try:
+        ip = ipaddress.ip_address(hostname)
+        if ip.is_private or ip.is_loopback or ip.is_reserved or ip.is_link_local:
+            return False, "No se permiten IPs privadas o reservadas"
+    except ValueError:
+        # Es un hostname, no una IP - resolver y verificar
+        try:
+            resolved = socket.gethostbyname(hostname)
+            ip = ipaddress.ip_address(resolved)
+            if ip.is_private or ip.is_loopback or ip.is_reserved or ip.is_link_local:
+                return False, "El hostname resuelve a una IP privada"
+        except socket.gaierror:
+            pass  # No se pudo resolver, dejar pasar (fallará al conectarse)
+
+    # Bloquear protocolos peligrosos en el path
+    if "file:" in url.lower() or "javascript:" in url.lower():
+        return False, "Protocolo no permitido"
+
+    return True, ""
 
 
 @app.route("/api/health", methods=["GET"])
@@ -62,11 +149,11 @@ def start_analysis():
     portals = data.get("portals", PORTALS)
 
     analysis_id = str(uuid.uuid4())[:8]
-    analyses[analysis_id] = {
+    _set_analysis(analysis_id, {
         "id": analysis_id, "status": "processing", "progress": 0,
         "message": "Iniciando analisis...", "result": None,
         "created_at": datetime.now().isoformat(),
-    }
+    })
 
     try:
         if mode == "url":
@@ -118,11 +205,11 @@ def start_browser_assisted_analysis():
         return jsonify({"error": "Se requiere listing_url o listing_html"}), 400
 
     analysis_id = str(uuid.uuid4())[:8]
-    analyses[analysis_id] = {
+    _set_analysis(analysis_id, {
         "id": analysis_id, "status": "processing", "progress": 0,
         "message": "Procesando datos del browser...", "result": None,
         "created_at": datetime.now().isoformat(),
-    }
+    })
 
     try:
         if listing_html:
@@ -228,7 +315,7 @@ def parse_search():
 
 @app.route("/api/analyze/<analysis_id>", methods=["GET"])
 def get_analysis(analysis_id):
-    entry = analyses.get(analysis_id)
+    entry = _get_analysis(analysis_id)
     if not entry:
         return jsonify({"error": "Analisis no encontrado"}), 404
     return jsonify(entry)
@@ -255,12 +342,23 @@ def get_demo():
 
 @app.route("/api/proxy-fetch", methods=["POST"])
 def proxy_fetch():
+    if limiter:
+        # Rate limit: 30 requests per minute for proxy-fetch
+        try:
+            limiter.limit("30 per minute")(lambda: None)()
+        except Exception:
+            pass
     import requests as req
     data = request.get_json()
     url = data.get("url", "") if data else ""
     force_browser = data.get("force_browser", False)
     if not url:
         return jsonify({"error": "Se requiere URL", "success": False}), 400
+
+    # Validar URL para prevenir SSRF
+    is_valid, error_msg = _validate_url(url)
+    if not is_valid:
+        return jsonify({"error": error_msg, "success": False}), 400
 
     # Portales que necesitan browser real (bloquean requests HTTP simples)
     needs_browser = any(domain in url for domain in ["booking.com", "vrbo.com", "google.com/travel"])
@@ -314,21 +412,17 @@ def proxy_fetch():
         return jsonify({"error": str(e), "success": False, "status": 0, "method": "requests"})
 
 
-def _run_analysis(analysis_id, listing, portals, is_demo):
+def _run_analysis_common(analysis_id, listing, portal_results_fn, search_progress_msg="Buscando comparables...", search_progress_pct=20):
+    """Función común para ejecutar análisis (directa o browser-assisted)."""
     try:
-        entry = analyses[analysis_id]
-        entry["progress"] = 20
-        entry["message"] = "Buscando comparables en portales..."
-        if is_demo:
-            portal_results = get_demo_comparables()
-        else:
-            portal_results = search_all_portals(listing, portals)
+        _update_analysis(analysis_id, progress=search_progress_pct, message=search_progress_msg)
+        portal_results = portal_results_fn()
         total = sum(len(v) for v in portal_results.values())
-        entry["progress"] = 60
-        entry["message"] = "Encontrados %d comparables. Analizando..." % total
+        portal_detail = ", ".join(f"{p}: {len(v)}" for p, v in portal_results.items() if v)
+        _update_analysis(analysis_id, progress=60,
+                        message="Encontrados %d comparables (%s). Analizando..." % (total, portal_detail) if portal_detail else "Encontrados %d comparables. Analizando..." % total)
         result = analyze(listing, portal_results)
-        entry["progress"] = 80
-        entry["message"] = "Generando informes..."
+        _update_analysis(analysis_id, progress=80, message="Generando informes...")
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         html_path = os.path.join(OUTPUT_DIR, "informe_%s_%s.html" % (analysis_id, timestamp))
         generate_html_report(result, html_path)
@@ -339,52 +433,29 @@ def _run_analysis(analysis_id, listing, portals, is_demo):
                 generate_word_report(result, docx_path)
             except Exception:
                 docx_path = None
-        entry["progress"] = 100
-        entry["status"] = "completed"
-        entry["message"] = "Analisis completado"
-        entry["result"] = _serialize_result(result)
-        entry["html_report"] = os.path.basename(html_path)
-        entry["docx_report"] = os.path.basename(docx_path) if docx_path else None
+        _update_analysis(analysis_id,
+                        progress=100, status="completed",
+                        message="Analisis completado",
+                        result=_serialize_result(result),
+                        html_report=os.path.basename(html_path),
+                        docx_report=os.path.basename(docx_path) if docx_path else None)
     except Exception as e:
         logger.error("Error en analisis %s: %s", analysis_id, e, exc_info=True)
-        analyses[analysis_id]["status"] = "error"
-        analyses[analysis_id]["message"] = "Error: " + str(e)
-        analyses[analysis_id]["progress"] = 0
+        _update_analysis(analysis_id, status="error", message="Error: " + str(e), progress=0)
+
+
+def _run_analysis(analysis_id, listing, portals, is_demo):
+    def get_results():
+        if is_demo:
+            return get_demo_comparables()
+        return search_all_portals(listing, portals)
+    _run_analysis_common(analysis_id, listing, get_results, "Buscando comparables en portales...", 20)
 
 
 def _run_browser_assisted_analysis(analysis_id, listing, search_html, max_comparables=20):
-    try:
-        entry = analyses[analysis_id]
-        entry["progress"] = 30
-        entry["message"] = "Parseando resultados de portales..."
-        portal_results = search_with_browser_html(listing, search_html, max_results=max_comparables)
-        total = sum(len(v) for v in portal_results.values())
-        entry["progress"] = 60
-        entry["message"] = "Encontrados %d comparables. Analizando..." % total
-        result = analyze(listing, portal_results)
-        entry["progress"] = 80
-        entry["message"] = "Generando informes..."
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        html_path = os.path.join(OUTPUT_DIR, "informe_%s_%s.html" % (analysis_id, timestamp))
-        generate_html_report(result, html_path)
-        docx_path = None
-        if DOCX_AVAILABLE:
-            docx_path = os.path.join(OUTPUT_DIR, "informe_%s_%s.docx" % (analysis_id, timestamp))
-            try:
-                generate_word_report(result, docx_path)
-            except Exception:
-                docx_path = None
-        entry["progress"] = 100
-        entry["status"] = "completed"
-        entry["message"] = "Analisis completado"
-        entry["result"] = _serialize_result(result)
-        entry["html_report"] = os.path.basename(html_path)
-        entry["docx_report"] = os.path.basename(docx_path) if docx_path else None
-    except Exception as e:
-        logger.error("Error en analisis browser-assisted %s: %s", analysis_id, e, exc_info=True)
-        analyses[analysis_id]["status"] = "error"
-        analyses[analysis_id]["message"] = "Error: " + str(e)
-        analyses[analysis_id]["progress"] = 0
+    def get_results():
+        return search_with_browser_html(listing, search_html, max_results=max_comparables)
+    _run_analysis_common(analysis_id, listing, get_results, "Parseando resultados de portales...", 30)
 
 
 # Serve frontend
@@ -413,20 +484,90 @@ def serve_static(path):
 
 
 def _serialize_result(result):
+    import statistics as stats_mod
+    comparables = result.comparables or []
+    prices = [c.price_per_night for c in comparables if c.price_per_night > 0]
+    ratings = [c.rating for c in comparables if c.rating > 0]
+
+    # Estadísticas por portal
+    portal_stats = {}
+    for c in comparables:
+        portal = c.source or "unknown"
+        if portal not in portal_stats:
+            portal_stats[portal] = {"count": 0, "prices": [], "ratings": [], "with_amenities": 0}
+        portal_stats[portal]["count"] += 1
+        if c.price_per_night > 0:
+            portal_stats[portal]["prices"].append(c.price_per_night)
+        if c.rating > 0:
+            portal_stats[portal]["ratings"].append(c.rating)
+        if c.amenities:
+            portal_stats[portal]["with_amenities"] += 1
+
+    portal_summary = {}
+    for portal, data in portal_stats.items():
+        portal_summary[portal] = {
+            "count": data["count"],
+            "avg_price": round(stats_mod.mean(data["prices"]), 2) if data["prices"] else 0,
+            "min_price": round(min(data["prices"]), 2) if data["prices"] else 0,
+            "max_price": round(max(data["prices"]), 2) if data["prices"] else 0,
+            "avg_rating": round(stats_mod.mean(data["ratings"]), 2) if data["ratings"] else 0,
+            "with_amenities": data["with_amenities"],
+        }
+
+    # Distribución de precios vs usuario
+    original = result.original
+    price_distribution = {"cheaper": 0, "similar": 0, "more_expensive": 0}
+    if original and original.price_per_night > 0 and prices:
+        low = original.price_per_night * 0.85
+        high = original.price_per_night * 1.15
+        for p in prices:
+            if p < low:
+                price_distribution["cheaper"] += 1
+            elif p > high:
+                price_distribution["more_expensive"] += 1
+            else:
+                price_distribution["similar"] += 1
+
+    # Desviación estándar del precio
+    price_stdev = round(stats_mod.stdev(prices), 2) if len(prices) >= 2 else 0
+
+    # Top comparables por precio más cercano al usuario
+    top_matches = []
+    if original and original.price_per_night > 0:
+        sorted_by_proximity = sorted(
+            [c for c in comparables if c.price_per_night > 0],
+            key=lambda c: abs(c.price_per_night - original.price_per_night)
+        )
+        for c in sorted_by_proximity[:5]:
+            top_matches.append({
+                "title": c.title,
+                "source": c.source,
+                "price": c.price_per_night,
+                "rating": c.rating,
+                "url": c.url,
+                "diff_pct": round(((c.price_per_night - original.price_per_night) / original.price_per_night) * 100, 1) if original.price_per_night > 0 else 0,
+            })
+
     return {
         "original": result.original.to_dict() if result.original else {},
-        "comparables": [c.to_dict() for c in result.comparables],
+        "comparables": [c.to_dict() for c in comparables],
         "stats": {
-            "total_comparables": len(result.comparables),
+            "total_comparables": len(comparables),
             "avg_price": round(result.avg_price, 2),
             "median_price": round(result.median_price, 2),
             "min_price": round(result.min_price, 2),
             "max_price": round(result.max_price, 2),
+            "price_stdev": price_stdev,
             "price_percentile": round(result.price_percentile, 1),
             "suggested_price_low": round(result.suggested_price_low, 2),
             "suggested_price_high": round(result.suggested_price_high, 2),
             "avg_rating": round(result.avg_rating, 2),
+            "total_with_prices": len(prices),
+            "total_with_ratings": len(ratings),
         },
+        "portal_stats": portal_summary,
+        "price_distribution": price_distribution,
+        "top_matches": top_matches,
         "analysis": {
             "rating_comparison": result.rating_comparison,
             "common_amenities": result.common_amenities,
@@ -464,7 +605,7 @@ def _geocode_address(address: str):
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    debug = os.environ.get("FLASK_DEBUG", "true").lower() == "true"
+    debug = os.environ.get("FLASK_DEBUG", "false").lower() == "true"
     print("\n" + "=" * 50)
     print("  ALOJANDO BOT - Servidor Web v2.1")
     print("  http://localhost:%d" % port)

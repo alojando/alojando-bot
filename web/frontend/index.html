@@ -211,6 +211,8 @@
         const [reports, setReports] = useState({ html: null, docx: null });
 
         const pollInterval = useRef(null);
+        const pollCount = useRef(0);
+        const MAX_POLL_ATTEMPTS = 200; // ~5 minutes at 1.5s intervals
 
         // Fetch HTML via backend proxy
         const proxyFetch = async (url) => {
@@ -225,6 +227,7 @@
         const startAnalysis = async (payload) => {
             setView("loading");
             setProgress({ progress: 2, message: "Iniciando..." });
+            pollCount.current = 0;
 
             // For URL mode: use browser-assisted flow
             if (payload.mode === "url") {
@@ -400,6 +403,13 @@
         };
 
         const pollStatus = async (id) => {
+            pollCount.current++;
+            if (pollCount.current > MAX_POLL_ATTEMPTS) {
+                clearInterval(pollInterval.current);
+                alert("El analisis excedio el tiempo maximo (~5 minutos). Intenta de nuevo.");
+                setView("form");
+                return;
+            }
             try {
                 const res = await fetch(API + "/analyze/" + id);
                 const data = await res.json();
@@ -407,11 +417,13 @@
 
                 if (data.status === "completed") {
                     clearInterval(pollInterval.current);
+                    pollCount.current = 0;
                     setResult(data.result);
                     setReports({ html: data.html_report, docx: data.docx_report });
                     setView("results");
                 } else if (data.status === "error") {
                     clearInterval(pollInterval.current);
+                    pollCount.current = 0;
                     alert("Error: " + data.message);
                     setView("form");
                 }
@@ -822,7 +834,21 @@
         const analysis = result.analysis || {};
         const suggestions = result.suggestions || {};
         const comparables = result.comparables || [];
+        const portalStats = result.portal_stats || {};
+        const priceDistribution = result.price_distribution || {};
+        const topMatches = result.top_matches || [];
         const currency = original.currency || "USD";
+
+        // Calcular posicionamiento
+        const priceDiff = stats.median_price > 0 && original.price_per_night > 0
+            ? Math.round(((original.price_per_night - stats.median_price) / stats.median_price) * 100)
+            : null;
+        const pricePosition = priceDiff !== null
+            ? (priceDiff > 15 ? "Por encima" : priceDiff < -15 ? "Por debajo" : "Alineado")
+            : null;
+        const priceColor = priceDiff !== null
+            ? (priceDiff > 15 ? "var(--warning)" : priceDiff < -15 ? "var(--success)" : "var(--primary-light)")
+            : "var(--text-muted)";
 
         return (
             <div>
@@ -831,17 +857,19 @@
                         <h2 style={{ fontSize: "1.5rem", fontWeight: 700 }}>{original.title || "Resultados"}</h2>
                         <p style={{ color: "var(--text-muted)" }}>
                             {[original.neighborhood, original.city, original.country].filter(Boolean).join(", ")}
+                            {original.bedrooms > 0 && ` · ${original.bedrooms} dorm.`}
+                            {original.max_guests > 0 && ` · ${original.max_guests} huespedes`}
                         </p>
                     </div>
                     <div className="download-bar">
                         {reports.html && (
                             <a href={API + "/report/" + reports.html} className="btn btn-secondary" download>
-                                📊 Descargar HTML
+                                Descargar HTML
                             </a>
                         )}
                         {reports.docx && (
                             <a href={API + "/report/" + reports.docx} className="btn btn-secondary" download>
-                                📄 Descargar Word
+                                Descargar Word
                             </a>
                         )}
                         <button className="btn btn-primary" onClick={onNewAnalysis}>Nuevo analisis</button>
@@ -850,12 +878,31 @@
 
                 {/* Stats */}
                 <div className="stats-grid">
-                    <div className="stat"><div className="value">{stats.total_comparables}</div><div className="label">Comparables</div></div>
+                    <div className="stat"><div className="value">{stats.total_comparables}</div><div className="label">Comparables ({stats.total_with_prices || 0} con precio)</div></div>
                     <div className="stat"><div className="value">{currency} {Math.round(stats.median_price)}</div><div className="label">Mediana mercado</div></div>
                     <div className="stat"><div className="value">{currency} {Math.round(original.price_per_night || 0)}</div><div className="label">Tu precio</div></div>
-                    <div className="stat"><div className="value">{(stats.avg_rating || 0).toFixed(1)}</div><div className="label">Rating promedio</div></div>
-                    <div className="stat"><div className="value">{currency} {Math.round(stats.suggested_price_low)}-{Math.round(stats.suggested_price_high)}</div><div className="label">Precio sugerido</div></div>
+                    <div className="stat">
+                        <div className="value" style={{ color: priceColor, WebkitTextFillColor: priceColor }}>
+                            {pricePosition || "-"}{priceDiff !== null && ` (${priceDiff > 0 ? "+" : ""}${priceDiff}%)`}
+                        </div>
+                        <div className="label">Posicionamiento</div>
+                    </div>
+                    <div className="stat"><div className="value">{(stats.avg_rating || 0).toFixed(1)}</div><div className="label">Rating promedio ({stats.total_with_ratings || 0})</div></div>
+                    <div className="stat"><div className="value">{currency} {Math.round(stats.suggested_price_low)}-{Math.round(stats.suggested_price_high)}</div><div className="label">Precio sugerido (P25-P75)</div></div>
                 </div>
+
+                {/* Portal breakdown mini */}
+                {Object.keys(portalStats).length > 0 && (
+                    <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "1.5rem" }}>
+                        {Object.entries(portalStats).map(([portal, ps]) => (
+                            <div key={portal} style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: "10px", padding: "0.5rem 1rem", fontSize: "0.8rem" }}>
+                                <span className={"tag tag-portal tag-" + portal} style={{ marginRight: "0.4rem" }}>{portal.toUpperCase()}</span>
+                                {ps.count} listings
+                                {ps.avg_price > 0 && ` · ${currency} ${Math.round(ps.avg_price)} prom.`}
+                            </div>
+                        ))}
+                    </div>
+                )}
 
                 {/* Tabs */}
                 <div className="tabs">
@@ -886,15 +933,77 @@
     // ============================================
     function OverviewTab({ result }) {
         const suggestions = result.suggestions || {};
+        const topMatches = result.top_matches || [];
+        const priceDist = result.price_distribution || {};
+        const stats = result.stats || {};
+        const original = result.original || {};
+        const currency = original.currency || "USD";
+        const totalDist = (priceDist.cheaper || 0) + (priceDist.similar || 0) + (priceDist.more_expensive || 0);
+
         return (
             <div>
                 <div className="card">
                     <h2><span className="icon">💰</span> Precio</h2>
                     {(suggestions.pricing || []).map((s, i) => <div key={i} className="suggestion">{s}</div>)}
+                    {stats.price_stdev > 0 && (
+                        <p style={{ color: "var(--text-dim)", fontSize: "0.85rem", marginTop: "0.5rem" }}>
+                            Desviacion estandar: {currency} {Math.round(stats.price_stdev)} — {stats.price_stdev < stats.median_price * 0.3 ? "mercado estable" : "alta variabilidad de precios"}
+                        </p>
+                    )}
                 </div>
+
+                {/* Distribución de precios */}
+                {totalDist > 0 && (
+                    <div className="card">
+                        <h2><span className="icon">📊</span> Distribucion vs tu precio</h2>
+                        <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap" }}>
+                            <div style={{ flex: 1, textAlign: "center", padding: "1rem", background: "rgba(34,197,94,0.1)", borderRadius: "10px" }}>
+                                <div style={{ fontSize: "1.5rem", fontWeight: 700, color: "#22c55e" }}>{priceDist.cheaper || 0}</div>
+                                <div style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>Mas baratos</div>
+                                <div style={{ fontSize: "0.75rem", color: "var(--text-dim)" }}>{totalDist > 0 ? Math.round(((priceDist.cheaper || 0) / totalDist) * 100) : 0}%</div>
+                            </div>
+                            <div style={{ flex: 1, textAlign: "center", padding: "1rem", background: "rgba(59,130,246,0.1)", borderRadius: "10px" }}>
+                                <div style={{ fontSize: "1.5rem", fontWeight: 700, color: "#3b82f6" }}>{priceDist.similar || 0}</div>
+                                <div style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>Precio similar</div>
+                                <div style={{ fontSize: "0.75rem", color: "var(--text-dim)" }}>+/- 15%</div>
+                            </div>
+                            <div style={{ flex: 1, textAlign: "center", padding: "1rem", background: "rgba(239,68,68,0.1)", borderRadius: "10px" }}>
+                                <div style={{ fontSize: "1.5rem", fontWeight: 700, color: "#ef4444" }}>{priceDist.more_expensive || 0}</div>
+                                <div style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>Mas caros</div>
+                                <div style={{ fontSize: "0.75rem", color: "var(--text-dim)" }}>{totalDist > 0 ? Math.round(((priceDist.more_expensive || 0) / totalDist) * 100) : 0}%</div>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Top matches */}
+                {topMatches.length > 0 && (
+                    <div className="card">
+                        <h2><span className="icon">🎯</span> Competidores mas similares en precio</h2>
+                        <div className="table-wrap">
+                            <table>
+                                <thead><tr><th>Portal</th><th>Titulo</th><th>Precio</th><th>Diferencia</th><th>Rating</th></tr></thead>
+                                <tbody>
+                                    {topMatches.map((m, i) => (
+                                        <tr key={i}>
+                                            <td><span className={"tag tag-portal tag-" + m.source}>{(m.source || "").toUpperCase()}</span></td>
+                                            <td>{m.url ? <a href={m.url} target="_blank" style={{ color: "var(--primary-light)" }}>{(m.title || "").substring(0, 40)}</a> : (m.title || "").substring(0, 40)}</td>
+                                            <td>{currency} {Math.round(m.price)}</td>
+                                            <td style={{ color: m.diff_pct > 0 ? "#ef4444" : m.diff_pct < 0 ? "#22c55e" : "var(--text)" }}>
+                                                {m.diff_pct > 0 ? "+" : ""}{m.diff_pct}%
+                                            </td>
+                                            <td>{m.rating > 0 ? m.rating.toFixed(1) : "-"}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                )}
+
                 <div className="card">
                     <h2><span className="icon">⭐</span> Calificaciones</h2>
-                    <div className="suggestion">{result.analysis?.rating_comparison || "Sin datos"}</div>
+                    <div className="suggestion">{result.analysis?.rating_comparison || "Sin datos de calificacion disponibles"}</div>
                 </div>
                 <div className="card">
                     <h2><span className="icon">💡</span> Recomendaciones clave</h2>
@@ -1029,32 +1138,68 @@
         const comparables = result.comparables || [];
         const original = result.original || {};
         const currency = original.currency || "USD";
+        const [sortBy, setSortBy] = useState("price_asc");
+        const [filterPortal, setFilterPortal] = useState("all");
+
+        const portals = [...new Set(comparables.map(c => c.source).filter(Boolean))];
+
+        const filtered = filterPortal === "all" ? comparables : comparables.filter(c => c.source === filterPortal);
+        const sorted = [...filtered].sort((a, b) => {
+            if (sortBy === "price_asc") return (a.price_per_night || 0) - (b.price_per_night || 0);
+            if (sortBy === "price_desc") return (b.price_per_night || 0) - (a.price_per_night || 0);
+            if (sortBy === "rating") return (b.rating || 0) - (a.rating || 0);
+            if (sortBy === "reviews") return (b.review_count || 0) - (a.review_count || 0);
+            return 0;
+        });
 
         return (
             <div className="card">
                 <h2><span className="icon">🏘️</span> {comparables.length} comparables encontrados</h2>
+                <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "1rem" }}>
+                    <select value={sortBy} onChange={e => setSortBy(e.target.value)}
+                        style={{ padding: "0.4rem 0.8rem", background: "var(--bg-input)", border: "1px solid var(--border)", borderRadius: "8px", color: "var(--text)", fontSize: "0.85rem" }}>
+                        <option value="price_asc">Precio: menor a mayor</option>
+                        <option value="price_desc">Precio: mayor a menor</option>
+                        <option value="rating">Mejor rating</option>
+                        <option value="reviews">Mas resenas</option>
+                    </select>
+                    <select value={filterPortal} onChange={e => setFilterPortal(e.target.value)}
+                        style={{ padding: "0.4rem 0.8rem", background: "var(--bg-input)", border: "1px solid var(--border)", borderRadius: "8px", color: "var(--text)", fontSize: "0.85rem" }}>
+                        <option value="all">Todos los portales ({comparables.length})</option>
+                        {portals.map(p => <option key={p} value={p}>{p.charAt(0).toUpperCase() + p.slice(1)} ({comparables.filter(c => c.source === p).length})</option>)}
+                    </select>
+                </div>
                 <div className="table-wrap">
                     <table>
-                        <thead><tr><th>Portal</th><th>Titulo</th><th>Precio</th><th>Rating</th><th>Resenas</th><th>Dorm.</th></tr></thead>
+                        <thead><tr><th>Portal</th><th>Titulo</th><th>Precio</th><th>vs Tuyo</th><th>Rating</th><th>Resenas</th><th>Dorm.</th></tr></thead>
                         <tbody>
                             <tr className="highlight">
                                 <td><span className="tag tag-portal tag-manual">TU ANUNCIO</span></td>
-                                <td>{(original.title || "").substring(0, 45)}</td>
+                                <td>{(original.title || "").substring(0, 40)}</td>
                                 <td>{currency} {Math.round(original.price_per_night || 0)}</td>
+                                <td>-</td>
                                 <td>{(original.rating || 0).toFixed(1)}</td>
                                 <td>{original.review_count || "-"}</td>
                                 <td>{original.bedrooms || "-"}</td>
                             </tr>
-                            {comparables.map((c, i) => (
-                                <tr key={i}>
-                                    <td><span className={"tag tag-portal tag-" + c.source}>{c.source?.toUpperCase()}</span></td>
-                                    <td>{c.url ? <a href={c.url} target="_blank" style={{ color: "var(--primary-light)" }}>{(c.title || "").substring(0, 45)}</a> : (c.title || "").substring(0, 45)}</td>
-                                    <td>{c.price_per_night > 0 ? currency + " " + Math.round(c.price_per_night) : "-"}</td>
-                                    <td>{c.rating > 0 ? c.rating.toFixed(1) : "-"}</td>
-                                    <td>{c.review_count > 0 ? c.review_count : "-"}</td>
-                                    <td>{c.bedrooms > 0 ? c.bedrooms : "-"}</td>
-                                </tr>
-                            ))}
+                            {sorted.map((c, i) => {
+                                const diff = original.price_per_night > 0 && c.price_per_night > 0
+                                    ? Math.round(((c.price_per_night - original.price_per_night) / original.price_per_night) * 100)
+                                    : null;
+                                return (
+                                    <tr key={i}>
+                                        <td><span className={"tag tag-portal tag-" + c.source}>{c.source?.toUpperCase()}</span></td>
+                                        <td>{c.url ? <a href={c.url} target="_blank" style={{ color: "var(--primary-light)" }}>{(c.title || "").substring(0, 40)}</a> : (c.title || "").substring(0, 40)}</td>
+                                        <td>{c.price_per_night > 0 ? currency + " " + Math.round(c.price_per_night) : "-"}</td>
+                                        <td style={{ color: diff !== null ? (diff > 0 ? "#ef4444" : diff < 0 ? "#22c55e" : "var(--text)") : "var(--text-dim)" }}>
+                                            {diff !== null ? (diff > 0 ? "+" : "") + diff + "%" : "-"}
+                                        </td>
+                                        <td>{c.rating > 0 ? c.rating.toFixed(1) : "-"}</td>
+                                        <td>{c.review_count > 0 ? c.review_count : "-"}</td>
+                                        <td>{c.bedrooms > 0 ? c.bedrooms : "-"}</td>
+                                    </tr>
+                                );
+                            })}
                         </tbody>
                     </table>
                 </div>

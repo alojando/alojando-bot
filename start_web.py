@@ -22,7 +22,7 @@ def main():
 
     # Iniciar servidor
     app_path = os.path.join(os.path.dirname(__file__), "web", "app.py")
-    os.environ["FLASK_DEBUG"] = "true"
+    os.environ.setdefault("FLASK_DEBUG", "false")
     subprocess.call([sys.executable, app_path])
 
 if __name__ == "__main__":
