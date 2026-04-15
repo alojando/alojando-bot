@@ -346,6 +346,30 @@ def _parse_booking_search(html: str) -> List[ListingData]:
             if review_match:
                 listing.review_count = int(review_match.group(1))
 
+        # Extraer dormitorios, huéspedes y baños del texto del card
+        card_text = card.get_text(separator=" ", strip=True)
+
+        # Dormitorios: "1 dormitorio", "2 bedrooms", "Studio"
+        if listing.bedrooms == 0:
+            bed_match = re.search(r'(\d+)\s*(?:dormitorio|bedroom|habitaci)', card_text, re.I)
+            if bed_match:
+                listing.bedrooms = int(bed_match.group(1))
+            elif re.search(r'\b(?:estudio|studio|monoambiente)\b', card_text, re.I):
+                # Es un estudio, marcar como 0 dormitorios pero sabemos que es chico
+                listing.property_type = "estudio"
+
+        # Huéspedes/personas: "4 huéspedes", "sleeps 6", "4 adultos"
+        if listing.max_guests == 0:
+            guests_match = re.search(r'(\d+)\s*(?:hu[eé]sped|guest|persona|adult)', card_text, re.I)
+            if guests_match:
+                listing.max_guests = int(guests_match.group(1))
+
+        # Baños
+        if listing.bathrooms == 0:
+            bath_match = re.search(r'(\d+)\s*(?:ba[ñn]o|bathroom)', card_text, re.I)
+            if bath_match:
+                listing.bathrooms = int(bath_match.group(1))
+
         if listing.title:
             results.append(listing)
 
@@ -556,6 +580,16 @@ def _parse_google_search(html: str) -> List[ListingData]:
             listing.rating = float(f"{rating_match.group(1)}.{rating_match.group(2)}")
             listing.review_count = int(rating_match.group(3))
 
+        # Dormitorios y huéspedes del texto
+        details_match = re.search(r'(\d+)\s*dormitorio', card_text, re.I)
+        if details_match:
+            listing.bedrooms = int(details_match.group(1))
+        guests_match = re.search(r'[Cc]apacidad\s*(?:para\s*)?(\d+)', card_text)
+        if not guests_match:
+            guests_match = re.search(r'(\d+)\s*(?:hu[eé]sped|guest|persona)', card_text, re.I)
+        if guests_match:
+            listing.max_guests = int(guests_match.group(1))
+
         # URL
         link = card.find("a", href=True)
         if link:
@@ -657,7 +691,8 @@ def search_with_browser_html(listing: ListingData, portal_html: Dict[str, str], 
                     all_results[portal] = []
                     continue
             results = parse_search_html(portal, html, max_results=max_results)
-            logger.info(f"{portal}: Parseados {len(results)} resultados")
+            pre_filter_count = len(results)
+            logger.info(f"{portal}: Parseados {pre_filter_count} resultados")
 
             # Detectar moneda del portal y convertir precios a moneda del usuario
             portal_currency = detect_currency_from_portal(portal, html[:5000])
@@ -665,7 +700,6 @@ def search_with_browser_html(listing: ListingData, portal_html: Dict[str, str], 
                 converted = 0
                 for r in results:
                     if r.price_per_night and r.price_per_night > 0:
-                        original_price = r.price_per_night
                         r.price_per_night = convert_price(r.price_per_night, portal_currency, target_currency)
                         r.currency = target_currency
                         converted += 1
@@ -682,6 +716,11 @@ def search_with_browser_html(listing: ListingData, portal_html: Dict[str, str], 
             # Filtrar por similitud: descartar propiedades muy diferentes
             results = _filter_similar(results, listing)
 
+            post_filter_count = len(results)
+            if pre_filter_count != post_filter_count:
+                logger.info(f"{portal}: {pre_filter_count} parseados -> {post_filter_count} similares "
+                           f"(filtrados {pre_filter_count - post_filter_count} por dormitorios/huespedes/precio)")
+
             all_results[portal] = results
         else:
             logger.warning(f"{portal}: No se recibió HTML")
@@ -690,14 +729,92 @@ def search_with_browser_html(listing: ListingData, portal_html: Dict[str, str], 
     return all_results
 
 
+def _infer_bedrooms_from_text(text: str) -> int:
+    """
+    Intenta inferir la cantidad de dormitorios desde el título o texto del card.
+    Patrones: "2 dormitorios", "3 bedroom", "2BR", "estudio", "studio", "monoambiente"
+    """
+    if not text:
+        return 0
+    text_lower = text.lower()
+
+    # Estudio/monoambiente = 0 dormitorios (pero lo marcamos como -1 para no confundir con "desconocido")
+    studio_patterns = ["estudio", "studio", "monoambiente", "loft", "efficiency"]
+    if any(p in text_lower for p in studio_patterns):
+        # Solo si no menciona dormitorios explícitamente
+        if not re.search(r'\d+\s*(dormitorio|bedroom|habitaci|br\b)', text_lower):
+            return 0
+
+    # "2 dormitorios", "3 bedrooms", "1 habitación", "2BR"
+    patterns = [
+        r'(\d+)\s*dormitorio',
+        r'(\d+)\s*bedroom',
+        r'(\d+)\s*habitaci[oó]n',
+        r'(\d+)\s*br\b',
+        r'(\d+)\s*bed\s*room',
+        r'(\d+)\s*dorm\b',
+        r'(\d+)\s*rec[aá]mara',
+        r'(\d+)\s*cuarto',
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text_lower)
+        if match:
+            return int(match.group(1))
+
+    return 0
+
+
+def _infer_guests_from_text(text: str) -> int:
+    """Intenta inferir la cantidad de huéspedes desde texto."""
+    if not text:
+        return 0
+    patterns = [
+        r'(\d+)\s*hu[eé]sped',
+        r'(\d+)\s*guest',
+        r'(\d+)\s*persona',
+        r'(\d+)\s*people',
+        r'capacidad\s*(?:para\s*)?(\d+)',
+        r'sleeps?\s*(\d+)',
+        r'(\d+)\s*adult',
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text.lower())
+        if match:
+            return int(match.group(1))
+    return 0
+
+
+def _enrich_listing_from_text(listing: ListingData) -> ListingData:
+    """
+    Enriquece un listing intentando extraer dormitorios y huéspedes
+    del título y otros textos disponibles.
+    """
+    text = " ".join(filter(None, [listing.title, listing.description]))
+
+    if listing.bedrooms == 0:
+        inferred = _infer_bedrooms_from_text(text)
+        if inferred > 0:
+            listing.bedrooms = inferred
+            logger.debug(f"Inferido {inferred} dormitorios de texto: {listing.title}")
+
+    if listing.max_guests == 0:
+        inferred = _infer_guests_from_text(text)
+        if inferred > 0:
+            listing.max_guests = inferred
+            logger.debug(f"Inferido {inferred} huespedes de texto: {listing.title}")
+
+    return listing
+
+
 def _filter_similar(results: List[ListingData], listing: ListingData) -> List[ListingData]:
     """
     Filtra resultados para quedarse solo con propiedades similares al listing original.
 
-    Criterios estrictos:
-    - Dormitorios: solo misma cantidad (si el comparable informa dormitorios)
-    - Huéspedes: si el listing tiene max_guests, descarta los que difieran mucho
-    - Precio: descarta outliers extremos (>5x o <0.1x del precio del usuario)
+    Criterios:
+    - Dormitorios: match exacto cuando ambos tienen datos; inferir de título si falta
+    - Huéspedes: máximo +2 personas de diferencia (no el doble)
+    - Precio: rango más ajustado (0.3x a 3x)
+    - Si no hay datos de dormitorios ni huéspedes, usar el precio como proxy
     """
     if not results:
         return results
@@ -708,29 +825,47 @@ def _filter_similar(results: List[ListingData], listing: ListingData) -> List[Li
     filtered = []
 
     for r in results:
-        # Filtro estricto por dormitorios: misma cantidad
+        # Enriquecer el comparable con datos inferidos del título
+        _enrich_listing_from_text(r)
+
+        # --- Filtro por dormitorios ---
         if user_bedrooms >= 0 and r.bedrooms > 0:
+            # Match exacto: 1 dormitorio solo compara con 1 dormitorio
             if r.bedrooms != user_bedrooms:
                 logger.debug(f"Filtrado por dormitorios: {r.title} ({r.bedrooms} dorm vs {user_bedrooms})")
                 continue
 
-        # Filtro por huéspedes: no aceptar propiedades con más del doble de capacidad
+        # --- Filtro por huéspedes (más estricto) ---
         if user_guests > 0 and r.max_guests > 0:
-            if r.max_guests > user_guests * 2:
-                logger.debug(f"Filtrado por huespedes: {r.title} ({r.max_guests} vs {user_guests})")
+            # Máximo +2 personas arriba, no menos de la mitad abajo
+            if r.max_guests > user_guests + 2:
+                logger.debug(f"Filtrado por huespedes (muy grande): {r.title} ({r.max_guests} vs {user_guests})")
+                continue
+            if r.max_guests < max(1, user_guests // 2):
+                logger.debug(f"Filtrado por huespedes (muy chico): {r.title} ({r.max_guests} vs {user_guests})")
                 continue
 
-        # Filtro por precio extremo
+        # --- Filtro por precio (más ajustado) ---
         if user_price > 0 and r.price_per_night > 0:
             ratio = r.price_per_night / user_price
-            if ratio > 5.0 or ratio < 0.1:
+            if ratio > 3.0 or ratio < 0.3:
                 logger.debug(f"Filtrado por precio extremo: {r.title} ({r.price_per_night} vs {user_price})")
                 continue
+
+        # --- Filtro de seguridad: si no tenemos datos de dormitorios del comparable,
+        #     usar el precio como proxy de tamaño ---
+        if user_bedrooms >= 0 and r.bedrooms == 0 and r.max_guests == 0:
+            # Sin datos de tamaño del comparable. Si el precio es > 2.5x del usuario,
+            # probablemente sea una propiedad mucho más grande.
+            if user_price > 0 and r.price_per_night > 0:
+                if r.price_per_night > user_price * 2.5:
+                    logger.debug(f"Filtrado por precio/tamaño proxy: {r.title} ({r.price_per_night} vs {user_price})")
+                    continue
 
         filtered.append(r)
 
     removed = len(results) - len(filtered)
     if removed > 0:
-        logger.info(f"Filtro de similitud: {removed} descartados, {len(filtered)} conservados")
+        logger.info(f"Filtro de similitud: {removed} descartados, {len(filtered)} conservados de {len(results)}")
 
     return filtered
